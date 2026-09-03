@@ -57,6 +57,7 @@ from observability import Observability
 APP_VERSION = "0.2.0"
 MAX_REQUEST_BYTES = 1_000_000
 RATE_LIMIT_PER_MINUTE = 120
+WORKER_STATUS_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "journal", "observability", "worker.json"))
 _rate_window: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
 if os.environ.get("SENTINEL_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -115,25 +116,27 @@ def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
 
 
 def _public_health() -> dict[str, Any]:
-    worker_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "journal", "observability", "worker.json"))
     worker: dict[str, Any] = {}
     try:
         import json
 
-        with open(worker_path, encoding="utf-8") as stream:
+        with open(WORKER_STATUS_PATH, encoding="utf-8") as stream:
             value = json.load(stream)
         if isinstance(value, dict):
             worker = value
     except (OSError, TypeError, ValueError):
         pass
     paper = os.environ.get("PAPER_TRADING", "").strip().lower() in {"1", "true", "yes", "on"}
+    heartbeat = worker.get("last_heartbeat")
+    heartbeat_fresh = isinstance(heartbeat, (int, float)) and time.time() - heartbeat <= 1_200
     return {
-        "status": "healthy" if worker.get("status") in {"running", "cycling"} else "degraded",
+        "status": "healthy" if worker.get("status") in {"running", "cycling"} and heartbeat_fresh else "degraded",
         "agent": worker.get("status", "unknown"),
         "market_data": "configured" if os.environ.get("SENTINEL_DATA_MODE", "offline").strip().lower() == "proxy" else "disabled",
         "alpaca": "configured" if os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_SECRET_KEY") else "not_configured",
         "paper_trading": paper,
         "last_heartbeat": worker.get("last_heartbeat"),
+        "heartbeat_fresh": heartbeat_fresh,
     }
 
 

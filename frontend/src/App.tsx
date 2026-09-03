@@ -26,9 +26,18 @@ function App() {
 
   useEffect(() => {
     if (!API_BASE_URL) return
-    getHealth()
-      .then(() => setConnection('online'))
-      .catch(() => setConnection('offline'))
+    let active = true
+    const probe = () => {
+      getHealth()
+        .then(() => active && setConnection('online'))
+        .catch(() => active && setConnection('offline'))
+    }
+    probe()
+    const timer = window.setInterval(probe, 15_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
   }, [])
 
   const filteredSymbols = demoSymbols.filter((item) => item.symbol.includes(search.toUpperCase()))
@@ -224,17 +233,28 @@ function ApiStatePage({ connection }: { connection: 'online' | 'offline' | 'demo
       return
     }
     const source = resolveSource()
-    Promise.all([source.getAccount(), source.getRisk()])
-      .then(([accountData, riskData]) => {
-        setAccount(accountData.portfolio_value)
-        setRisk(riskData.reason ?? (riskData.available ? 'Risk state available' : 'Risk data unavailable'))
-        setState(accountData.available || riskData.available ? 'connected' : 'unavailable')
-      })
-      .catch((error: unknown) => {
-        if (error instanceof ApiError && error.status === 401) setState('unauthorized')
-        else if (error instanceof ApiError && error.status === 403) setState('forbidden')
-        else setState('error')
-      })
+    let active = true
+    const refresh = () => {
+      Promise.all([source.getAccount(), source.getRisk()])
+        .then(([accountData, riskData]) => {
+          if (!active) return
+          setAccount(accountData.portfolio_value)
+          setRisk(riskData.reason ?? (riskData.available ? 'Risk state available' : 'Risk data unavailable'))
+          setState(accountData.available || riskData.available ? 'connected' : 'unavailable')
+        })
+        .catch((error: unknown) => {
+          if (!active) return
+          if (error instanceof ApiError && error.status === 401) setState('unauthorized')
+          else if (error instanceof ApiError && error.status === 403) setState('forbidden')
+          else setState('error')
+        })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 15_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
   }, [connection])
 
   if (state === 'loading') {

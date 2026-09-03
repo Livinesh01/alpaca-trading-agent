@@ -166,9 +166,21 @@ def test_public_readiness_is_not_healthy_without_worker(monkeypatch):
     monkeypatch.setenv("PAPER_TRADING", "true")
     monkeypatch.delenv("ALPACA_API_KEY", raising=False)
     monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    monkeypatch.setattr(api_app, "WORKER_STATUS_PATH", "missing-worker.json")
     response = api_app.public_ready()
     assert response.status_code == 503
     assert response.body
+
+
+def test_public_health_requires_fresh_worker_heartbeat(monkeypatch, tmp_path):
+    import api.app as api_app
+
+    worker_path = tmp_path / "worker.json"
+    worker_path.write_text('{"status":"running","last_heartbeat":0}', encoding="utf-8")
+    monkeypatch.setenv("PAPER_TRADING", "true")
+    monkeypatch.setenv("SENTINEL_DATA_MODE", "proxy")
+    monkeypatch.setattr(api_app, "WORKER_STATUS_PATH", str(worker_path))
+    assert api_app._public_health()["heartbeat_fresh"] is False
 
 
 # ===========================================================================
