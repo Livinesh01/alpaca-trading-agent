@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "alpaca": {
+      "command": "python",
+      "args": ["src/risk_guard_proxy.py"],
+      "env": {
+        "ALPACA_API_KEY": "${ALPACA_API_KEY}",
+        "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY}"
+      },
+      "timeout": 30
+    }
+  }
+}

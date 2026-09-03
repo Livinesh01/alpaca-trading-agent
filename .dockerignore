@@ -1,0 +1,53 @@
+# Exclude heavy / local-only artifacts from the Docker build context
+# (COPY . . would otherwise ingest the whole venv — slow builds).
+venv/
+.venv/
+.git/
+journal/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
+*.secret
+node_modules/
+frontend/
+dist/
+build/
+.coverage
+htmlcov/
+.tox/
+*.egg-info/
+
+# IDE and editor directories (no build relevance)
+.vscode/
+.claude/
+.cline-config/
+.github/
+.vercel/
+
+# Scratch / temporary files generated during development
+tmp_*.py
+tmp_*.json
+tmp_*.err
+tmp_*.out
+smoke.out
+smoke.err
+smoke_*.py
+smoke_*.err
+smoke_*.out
+pytest_*.txt
+
+# Compose-only metadata (not needed inside the image)
+.clinerules
+.mcp.json
+docker-compose.yml
+Dockerfile
+.dockerignore
+vercel.json
+.vercelignore

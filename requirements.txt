@@ -1,0 +1,8 @@
+mcp>=1.0.0
+alpaca-mcp-server>=2.2.1
+pyyaml>=6.0
+python-dotenv>=1.0.0
+prometheus-client>=0.20.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+pytest>=8.0.0

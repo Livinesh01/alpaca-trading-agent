@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "alpaca": {
+      "command": "C:/Users/acer/Downloads/alpaca-trading-agent/venv/Scripts/python.exe",
+      "args": ["src/risk_guard_proxy.py"],
+      "env": {
+        "ALPACA_MCP_COMMAND": "C:/Users/acer/Downloads/alpaca-trading-agent/venv/Scripts/alpaca-mcp-server.exe",
+        "ALPACA_MCP_ARGS": "[\"--env-file\", \".env\"]"
+      }
+    }
+  }
+}

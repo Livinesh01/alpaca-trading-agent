@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "alpaca-risk-guard": {
+      "command": "C:/Users/acer/Downloads/alpaca-trading-agent/venv/Scripts/python.exe",
+      "args": ["${workspaceFolder}/src/risk_guard_proxy.py"],
+      "env": {
+        "ALPACA_API_KEY": "${env:ALPACA_API_KEY}",
+        "ALPACA_SECRET_KEY": "${env:ALPACA_SECRET_KEY}",
+        "ALPACA_MCP_COMMAND": "C:/Users/acer/Downloads/alpaca-trading-agent/venv/Scripts/alpaca-mcp-server.exe",
+        "ALPACA_MCP_ARGS": "[\"--env-file\", \"${workspaceFolder}/.env\"]"
+      }
+    }
+  }
+}

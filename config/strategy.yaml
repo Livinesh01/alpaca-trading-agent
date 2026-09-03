@@ -1,0 +1,46 @@
+# Editable without touching any code. The orchestrator and risk guard both read this.
+
+watchlist:
+  - AAPL
+  - MSFT
+  - NVDA
+  - SPY
+  - TSLA
+
+risk_limits:
+  # Hard caps enforced by src/risk_rules.py — these are not suggestions to the LLM,
+  # they are checked in Python before any order reaches Alpaca.
+  max_position_notional_usd: 2000       # max $ value of any single position
+  max_order_notional_usd: 1000          # max $ value of any single order
+  max_open_positions: 5                 # portfolio-wide cap
+  max_daily_loss_usd: 500               # trading halts for the day if breached
+  max_orders_per_run: 3                 # caps how many orders one agent run can place
+  market_data_max_age_seconds: 120      # reject orders if latest trade data is older than this
+  allowed_symbols: []                   # empty = restrict to watchlist above
+  allow_short_selling: false
+  allow_options: false
+  allow_crypto: false
+
+signal_params:
+  # Used by src/signals.py via the proxy's virtual get_technical_signals tool.
+  timeframe: "1Day"
+  lookback_days: 180
+  bars_limit: 500
+  sma_fast_period: 20
+  sma_slow_period: 50
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  atr_period: 14
+  high_volatility_atr_pct: 3.0
+  momentum_lookback_bars: 10
+  momentum_flat_threshold_pct: 0.2
+
+schedule:
+  # Used by src/orchestrator.py when run under cron / GitHub Actions.
+  run_times_et: ["09:45", "12:30", "15:45"]
+  timezone: "America/New_York"
+  skip_if_market_closed: true
+
+account:
+  paper_trading: true

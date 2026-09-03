@@ -1,0 +1,11 @@
+# Cline Rules
+
+- Only read files directly relevant to the current task.
+- Do not scan the entire repository.
+- Do not inspect node_modules, .git, build, dist, coverage, or generated files.
+- Before reading a file, determine whether it is necessary.
+- Prefer editing the smallest number of files possible.
+- Do not run unnecessary commands.
+- Do not repeat commands whose output has already been obtained.
+- Keep terminal commands focused and concise.
+- For simple coding tasks, make the change directly instead of exploring unrelated files.

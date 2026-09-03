@@ -1,0 +1,63 @@
+name: Run trading agent
+
+on:
+  schedule:
+    # 13:45, 16:30, 19:45 UTC ≈ 9:45am / 12:30pm / 3:45pm ET (adjust for DST manually)
+    - cron: "45 13 * * 1-5"
+    - cron: "30 16 * * 1-5"
+    - cron: "45 19 * * 1-5"
+  workflow_dispatch: {}   # allows a manual "Run workflow" click for demos
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Set up Node.js (for Cline CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Cline CLI
+        run: npm install -g cline
+
+      # The agent loop now IS the Cline CLI (orchestrator.py invokes `cline`),
+      # so there is no Anthropic API key involved. Authentication is done via
+      # the Cline provider/usage-billing; install a token as a GitHub secret
+      # named CLINE_API_KEY and pass it to `cline auth -k`.
+      - name: Authenticate Cline (non-interactive)
+        env:
+          CLINE_API_KEY: ${{ secrets.CLINE_API_KEY }}
+        run: |
+          if [ -z "$CLINE_API_KEY" ]; then
+            echo "::warning::CLINE_API_KEY secret not set — skipping auth."
+            echo "The run will fail at the cline invocation step. Add a Cline"
+            echo "API key as a GH secret named CLINE_API_KEY to enable CI runs."
+            exit 0
+          fi
+          cline auth -p cline -k "$CLINE_API_KEY"
+
+      - name: Run agent
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          CLINE_RUN_TIMEOUT_SECONDS: "600"
+          CLINE_MAX_RETRIES: "6"
+        run: python src/orchestrator.py --force
+
+      - name: Commit updated journal
+        run: |
+          git config user.name "trading-agent-bot"
+          git config user.email "actions@github.com"
+          git add journal/
+          git diff --staged --quiet || git commit -m "Trading agent run: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
+

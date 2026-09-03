@@ -1,0 +1,85 @@
+services:
+  agent:
+    build: .
+    environment:
+      - PAPER_TRADING=true
+      - SENTINEL_ENVIRONMENT=development
+      - SENTINEL_DATA_MODE=offline
+      # Development-only auth mode — the only working non-production mode.
+      # Production auth (OIDC/OAuth2) is explicitly unsupported until a real
+      # identity provider is integrated; see src/api/auth.py.
+      - API_AUTH_MODE=development
+    volumes:
+      - ./journal:/app/journal
+    ports:
+      - "8000:8000"   # FastAPI read-only API
+      - "9108:9108"   # Prometheus metrics endpoint
+    healthcheck:
+      # Pass X-Dev-Role so the auth middleware accepts the probe request.
+      # The health endpoint itself is read-only and returns no secrets.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; r=urllib.request.urlopen(urllib.request.Request('http://localhost:8000/api/v1/health',headers={'X-Dev-Role':'VIEWER'}),timeout=5); assert r.status==200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"   # Prometheus Pushgateway (chaos suite pushes here)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9091/-/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      agent:
+        condition: service_healthy
+      pushgateway:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_admin_password
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+    secrets:
+      - grafana_admin_password
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt

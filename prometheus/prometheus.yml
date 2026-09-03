@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "trading-agent"
+    static_configs:
+      - targets: ["agent:9108"]
+  - job_name: "chaos-suite"
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]

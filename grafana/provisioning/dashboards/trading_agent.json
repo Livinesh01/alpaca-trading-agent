@@ -1,0 +1,97 @@
+{
+  "title": "Alpaca Trading Agent",
+  "uid": "alpaca-trading-agent",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Account Equity ($)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "targets": [{ "expr": "agent_account_equity_usd" }]
+    },
+    {
+      "id": 2,
+      "title": "Daily P&L ($)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "targets": [{ "expr": "agent_daily_pnl_usd" }]
+    },
+    {
+      "id": 3,
+      "title": "Open Positions",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [{ "expr": "agent_open_positions" }]
+    },
+    {
+      "id": 4,
+      "title": "Orders Allowed vs Blocked",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "rate(agent_orders_allowed_total[1h])", "legendFormat": "allowed" },
+        { "expr": "rate(agent_orders_blocked_total[1h])", "legendFormat": "blocked" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Blocked Orders by Reason",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "expr": "sum by (reason_category) (agent_orders_blocked_total)" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "MCP Tool Call Volume",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "sum by (tool_name) (rate(agent_mcp_tool_calls_total[1h]))" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Chaos Pass Rate",
+      "type": "stat",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 22 },
+      "targets": [{ "expr": "100 * avg(chaos_scenario_check_status)" }],
+      "options": {
+        "colorMode": "value",
+        "fieldConfig": {
+          "defaults": {
+            "unit": "%",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 80, "color": "rgba(245,54,54,1)" },
+                { "value": 100, "color": "rgba(60,180,71,1)" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Chaos Pass/Fail",
+      "type": "table",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 22 },
+      "targets": [{ "expr": "chaos_scenario_check_status" }],
+      "options": {
+        "colorMode": "cell",
+        "colMin": "0",
+        "colMax": "1",
+        "fromColor": "rgba(245,54,54,1)",
+        "toColor": "rgba(60,180,71,1)"
+      }
+    }
+  ]
+}

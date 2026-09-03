@@ -1,0 +1,71 @@
+# Resilience contract — the six fault modes the fault-injection harness
+# (src/chaos_harness.py) targets, and what the proxy MUST do in each case.
+#
+# Unlike risk_limits in strategy.yaml (which cap what the AGENT may propose),
+# these describe how the proxy must behave when the UPSTREAM system — Alpaca's
+# API and data feed — misbehaves. This is the chaos-engineering contract:
+# "does the agent survive Alpaca misbehaving", not "does a number beat a limit".
+#
+# The scenario_* builders in chaos_harness.py map 1:1 onto these entries, and
+# tests/test_chaos_resilience.py asserts each guaranteed behavior.
+
+resilience_contract:
+  stale_market_data:
+    description: >-
+      The latest-trade feed returns a quote older than
+      market_data_max_age_seconds. A stale price must never be used to size
+      or gate an order.
+    injection: "latest trade timestamp older than the max-age window"
+    required_behavior: >-
+      _get_fresh_last_price rejects with a clear staleness reason (ValueError
+      containing 'stale'); the order path fails closed.
+
+  rate_limit_429:
+    description: >-
+      The upstream feed/API answers 429 Too Many Requests. The agent run must
+      not crash and must not silently pretend the symbol has no data.
+    injection: "get_stock_latest_trade returns an error result (429 text)"
+    required_behavior: >-
+      Degrade to a controlled ValueError ('get_stock_latest_trade failed');
+      the upstream call is genuinely attempted (visible in the call log), not
+      skipped as if the symbol were simply absent.
+
+  ambiguous_timeout:
+    description: >-
+      An order-placement call times out with an ambiguous 'MAY have been
+      placed' response. The proxy must reconcile to a definitive outcome
+      rather than leave the agent guessing.
+    injection: "place_stock_order raises an ambiguous-timeout RuntimeError"
+    required_behavior: >-
+      _lookup_order_by_client_id + _reconciliation_outcome resolve to exactly
+      one of filled | not_placed | still_pending — never 'unknown'.
+
+  partial_fill:
+    description: >-
+      An order fills for less than the requested quantity. The discrepancy
+      must remain visible and must never be mis-reported as fully filled.
+    injection: "place_stock_order returns status=partially_filled with filled_qty"
+    required_behavior: >-
+      _reconciliation_outcome classifies partially_filled as still_pending
+      (not filled); the response preserves the actual filled_qty.
+
+  flapping_connectivity:
+    description: >-
+      Network connectivity to the upstream MCP server drops mid-request. A
+      single dropped connection must surface as a catchable error and must
+      not abort the reconciliation search.
+    injection: "call_tool raises ConnectionError"
+    required_behavior: >-
+      ConnectionError propagates as a distinct, catchable error; during a
+      lookup, a dropped first tool does not abort the search — it continues
+      to the next lookup tool.
+
+  malformed_response:
+    description: >-
+      The upstream returns structurally present but unusable data (e.g. a
+      non-numeric price field). This is NOT the same as genuinely empty data
+      and must be treated distinctly.
+    injection: "get_stock_bars returns bars whose price fields are malformed"
+    required_behavior: >-
+      Signals degrade to insufficient_data=True (run keeps going); genuinely
+      empty bars still raise an explicit 'No bar data returned' ValueError.
