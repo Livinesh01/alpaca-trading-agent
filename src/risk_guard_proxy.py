@@ -21,7 +21,8 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+if os.environ.get("SENTINEL_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 sys.path.insert(0, os.path.dirname(__file__))
 import journal

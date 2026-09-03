@@ -67,6 +67,7 @@
 |---|---|---|
 | React/Vite frontend | informational, simulated | Read-only terminal views, explicit demo/offline/paper labels; no credentials. |
 | FastAPI API | security-critical, production-facing | Typed API boundary, RBAC, request controls, sanitized errors, correlation IDs. |
+| Paper worker | deterministic supervisor, production-facing | Persistent cycle runner; requires explicit paper mode, proxy data, provider, and secret-manager credentials. |
 | Market-data adapter | deterministic, production-facing | Validates provider data and freshness; unavailable data fails closed. |
 | Technical signals | deterministic | Calculates explainable indicators from validated bars. |
 | LLM decision | AI-controlled, advisory | Direction, confidence, thesis, and entry reasoning only. |
@@ -95,3 +96,9 @@ The LLM never controls quantity, risk limits, kill-switch state, final authoriza
 ## Deployment Boundaries
 
 `SENTINEL_ENVIRONMENT=development` is the local mode and may use `X-Dev-Role`. `paper` requires explicitly configured authentication. `production` is fail-closed because genuine OIDC/OAuth2 identity and independently verified production infrastructure are not implemented. The frontend accepts only the public `VITE_API_BASE_URL`; trading and model credentials remain backend-only.
+
+The worker is not hosted by Vercel. A process manager or container platform must run
+`src/worker.py` continuously and restart it after a crash. It writes a sanitized
+heartbeat to observability storage, while `/health` and `/ready` report whether that
+worker is actually running. Missing credentials, unavailable proxy data, provider
+failures, stale prices, risk rejection, and final-gate rejection produce no order.

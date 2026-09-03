@@ -59,7 +59,8 @@ MAX_REQUEST_BYTES = 1_000_000
 RATE_LIMIT_PER_MINUTE = 120
 _rate_window: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
-load_dotenv(os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".env")), override=False)
+if os.environ.get("SENTINEL_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+    load_dotenv(os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".env")), override=False)
 
 
 @asynccontextmanager
@@ -111,6 +112,42 @@ def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
     total = len(items)
     start = (page - 1) * page_size
     return {"items": items[start : start + page_size], "pagination": {"page": page, "page_size": page_size, "total": total}}
+
+
+def _public_health() -> dict[str, Any]:
+    worker_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "journal", "observability", "worker.json"))
+    worker: dict[str, Any] = {}
+    try:
+        import json
+
+        with open(worker_path, encoding="utf-8") as stream:
+            value = json.load(stream)
+        if isinstance(value, dict):
+            worker = value
+    except (OSError, TypeError, ValueError):
+        pass
+    paper = os.environ.get("PAPER_TRADING", "").strip().lower() in {"1", "true", "yes", "on"}
+    return {
+        "status": "healthy" if worker.get("status") in {"running", "cycling"} else "degraded",
+        "agent": worker.get("status", "unknown"),
+        "market_data": "configured" if os.environ.get("SENTINEL_DATA_MODE", "offline").strip().lower() == "proxy" else "disabled",
+        "alpaca": "configured" if os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_SECRET_KEY") else "not_configured",
+        "paper_trading": paper,
+        "last_heartbeat": worker.get("last_heartbeat"),
+    }
+
+
+@app.get("/health")
+def public_health() -> dict[str, Any]:
+    return _public_health()
+
+
+@app.get("/ready")
+def public_ready() -> dict[str, Any]:
+    health_data = _public_health()
+    if health_data["status"] != "healthy" or not health_data["paper_trading"]:
+        return JSONResponse(status_code=503, content=health_data)
+    return health_data
 
 
 @app.middleware("http")

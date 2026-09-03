@@ -32,6 +32,30 @@ services:
     cap_drop:
       - ALL
 
+  worker:
+    build: .
+    command: ["python", "src/worker.py"]
+    environment:
+      - APP_ENV=development
+      - PAPER_TRADING=true
+      - ALPACA_PAPER=true
+      - SENTINEL_DATA_MODE=proxy
+      - LLM_PROVIDER=${LLM_PROVIDER:-featherless}
+      - WORKER_INTERVAL_SECONDS=${WORKER_INTERVAL_SECONDS:-900}
+    volumes:
+      - ./journal:/app/journal
+    depends_on:
+      agent:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
 
   pushgateway:
     image: prom/pushgateway:latest

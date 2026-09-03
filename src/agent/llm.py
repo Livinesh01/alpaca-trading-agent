@@ -24,9 +24,10 @@ from errors import (
     LLMTimeoutError,
 )
 
-# Repo convention (same as src/risk_guard_proxy.py): load project .env at import.
-# os.environ already wins; load_dotenv never overrides existing values.
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+# Local dotenv loading is opt-in. Deployment workers must receive secrets from
+# their process environment or secret manager, never an arbitrary workspace file.
+if os.environ.get("SENTINEL_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
 @dataclass(frozen=True)

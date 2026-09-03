@@ -56,6 +56,10 @@ newline-delimited JSON output, and logs the outcome to the journal.
 - `src/orchestrator.py` — headless entry point: checks market hours, invokes the Cline
   CLI (`--cwd`, `--config .cline-config`, `--system`, `--timeout`, `--retries`, `--json`),
   and logs the outcome. Triggered by cron or a GitHub Actions schedule.
+- `src/worker.py` — optional persistent paper-only supervisor. It requires explicit
+  Alpaca paper credentials, a real configured LLM provider, and proxy data mode before
+  importing the trading loop. Use a process manager or the Compose worker service so
+  crashes are restarted without turning API requests into trading triggers.
 - `src/risk_guard_proxy.py` — the MCP proxy. This is the core deliverable; it is the
   `alpaca` MCP server in `.cline-config/cline_mcp_settings.json`.
 - `src/risk_rules.py` — pure, unit-tested risk logic (no I/O).
@@ -86,6 +90,12 @@ newline-delimited JSON output, and logs the outcome to the journal.
    risk-guard proxy) for cline.
 7. To run headless on a schedule: `python src/orchestrator.py`
 8. To bring up the full stack with monitoring: `docker compose up`
+
+For an always-on paper deployment, run `src/worker.py` as a supervised process with
+`PAPER_TRADING=true`, `ALPACA_PAPER=true`, `SENTINEL_DATA_MODE=proxy`, and a real
+`LLM_PROVIDER`. Inject `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, and the provider key
+through the platform secret manager; do not use frontend `VITE_*` variables. The
+worker fails closed when any requirement is missing. Vercel hosts the frontend only.
 
 ## Demo script (for judging)
 

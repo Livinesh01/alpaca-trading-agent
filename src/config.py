@@ -100,10 +100,13 @@ class SentinelConfig:
         invalid or dangerous combination. Never returns a config that could
         silently enable live trading.
         """
-        paper_trading = _env_bool("PAPER_TRADING", default=False)
+        trading_mode = (_env("TRADING_MODE") or "").lower()
+        if trading_mode and trading_mode != "paper":
+            raise LiveTradingUnsupportedError("TRADING_MODE must be 'paper'; live trading is unsupported")
+        paper_trading = _env_bool("PAPER_TRADING", default=trading_mode == "paper")
         kill_switch = _env_bool("TRADING_KILL_SWITCH", default=False)
 
-        environment = (_env("SENTINEL_ENVIRONMENT", "development") or "development").lower()
+        environment = (_env("APP_ENV") or _env("SENTINEL_ENVIRONMENT", "development") or "development").lower()
         if environment not in {"development", "paper", "production"}:
             raise ConfigurationError(
                 "SENTINEL_ENVIRONMENT must be 'development', 'paper', or 'production'"

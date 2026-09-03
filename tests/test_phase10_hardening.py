@@ -147,6 +147,30 @@ def test_config_to_safe_dict_excludes_secrets(monkeypatch):
         assert "token" not in key.lower()
 
 
+def test_worker_requires_explicit_paper_and_provider_secrets(monkeypatch):
+    import worker
+
+    monkeypatch.setenv("PAPER_TRADING", "true")
+    monkeypatch.setenv("ALPACA_PAPER", "true")
+    monkeypatch.setenv("SENTINEL_DATA_MODE", "proxy")
+    monkeypatch.setenv("LLM_PROVIDER", "featherless")
+    for name in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "FEATHERLESS_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError, match="ALPACA_API_KEY"):
+        worker.validate_worker_environment()
+
+
+def test_public_readiness_is_not_healthy_without_worker(monkeypatch):
+    import api.app as api_app
+
+    monkeypatch.setenv("PAPER_TRADING", "true")
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    response = api_app.public_ready()
+    assert response.status_code == 503
+    assert response.body
+
+
 # ===========================================================================
 # 2. LLM RELIABILITY
 # ===========================================================================

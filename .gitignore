@@ -21,3 +21,4 @@ smoke*.py
 tmp_*
 pytest_*.txt
 .env*
+!.env.example
