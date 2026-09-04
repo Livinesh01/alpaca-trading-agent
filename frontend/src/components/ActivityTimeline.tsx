@@ -11,10 +11,7 @@ const ICONS: Record<string, typeof Activity> = {
   play: Play,
 }
 
-/**
- * One frozen simulated agent run. Entries stagger in once on mount —
- * deterministic data, deterministic timing, no looping randomness.
- */
+/** Show one deterministic simulated agent run. */
 export default function ActivityTimeline() {
   return (
     <section className="panel timeline-panel" aria-label="Simulated agent activity">

@@ -17,12 +17,7 @@ const TICKS = [
   { left: '72%', delay: '5.4s' },
 ]
 
-/**
- * Quiet, deterministic market backdrop rendered behind the hero copy:
- * a faint quote grid, a row of drifting candlesticks, and slow price ticks.
- * Purely decorative — aria-hidden, CSS-transform only, disabled on small
- * screens via CSS and flattened for prefers-reduced-motion users.
- */
+/** Decorative, deterministic market backdrop for the hero. */
 export default function MarketBackdrop() {
   const candles = useMemo<Candle[]>(() => {
     const rand = mulberry32(42)

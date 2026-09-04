@@ -26,8 +26,9 @@ EXPOSE 8000
 EXPOSE 9108
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=15s \
-    CMD python -c "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://localhost:8000/api/v1/health', headers={'X-Dev-Role': 'VIEWER'}), timeout=5)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"
 
 # Safe default: start the read-only API server, NOT the trading orchestrator.
 # The orchestrator (which can execute trades) must be invoked explicitly.
+# Override with: docker run ... yourimage python src/worker.py
 CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

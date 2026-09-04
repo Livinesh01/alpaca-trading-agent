@@ -1,41 +1,18 @@
+"""RBAC role definitions and authorization helpers.
+
+Re-exports the production JWT authentication from `auth.py` while keeping
+backward compatibility with the existing API layer imports.
+"""
+
 from __future__ import annotations
 
-import os
-from enum import StrEnum
+from auth import (
+    Role,
+    get_current_role,
+    require_admin,
+    require_operator,
+    require_trader,
+    require_viewer,
+)
 
-from fastapi import Depends, Header, HTTPException, status
-
-
-class Role(StrEnum):
-    ADMIN = "ADMIN"
-    TRADER = "TRADER"
-    VIEWER = "VIEWER"
-
-
-def current_role(x_dev_role: str | None = Header(default=None)) -> Role:
-    """Development-only identity boundary; never pretends to be production auth."""
-    if os.environ.get("API_AUTH_MODE", "disabled").strip().lower() != "development":
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="authentication is not configured")
-    try:
-        return Role((x_dev_role or "").strip().upper())
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required") from exc
-
-
-ROLE_DEP = Depends(current_role)
-
-
-def require_viewer(role: Role = ROLE_DEP) -> Role:
-    return role
-
-
-def require_trader(role: Role = ROLE_DEP) -> Role:
-    if role not in {Role.TRADER, Role.ADMIN}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="trader role required")
-    return role
-
-
-def require_admin(role: Role = ROLE_DEP) -> Role:
-    if role != Role.ADMIN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
-    return role
+__all__ = ["Role", "get_current_role", "require_admin", "require_operator", "require_trader", "require_viewer"]

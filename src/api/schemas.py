@@ -24,11 +24,19 @@ class Health(BaseModel):
     paper_trading: bool
     kill_switch: bool
     llm_provider: str | None = None
-    market_data: str
-    market_data_fresh: bool
+    market_data: str | None = None
+    market_data_fresh: bool = False
     last_success: Any = None
     version: str
     authentication: str
+    backend: str | None = None
+    database: str | None = None
+    worker: str | None = None
+    alpaca: str | None = None
+    alpaca_paper: bool | None = None
+    last_heartbeat: Any = None
+    heartbeat_fresh: bool | None = None
+    auth_mode: str | None = None
 
 
 class Account(BaseModel):

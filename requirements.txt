@@ -6,3 +6,7 @@ prometheus-client>=0.20.0
 fastapi>=0.115.0
 uvicorn>=0.30.0
 pytest>=8.0.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+pyjwt>=2.8.0
+python-multipart>=0.0.9

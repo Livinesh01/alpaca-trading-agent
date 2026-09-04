@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=sentinel
+      - POSTGRES_USER=sentinel
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sentinel_dev}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   agent:
     build: .
     environment:
@@ -9,16 +24,20 @@ services:
       # Production auth (OIDC/OAuth2) is explicitly unsupported until a real
       # identity provider is integrated; see src/api/auth.py.
       - API_AUTH_MODE=development
+      - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel_dev}@postgres:5432/sentinel
     volumes:
       - ./journal:/app/journal
     ports:
       - "8000:8000"   # FastAPI read-only API
       - "9108:9108"   # Prometheus metrics endpoint
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
-      # Pass X-Dev-Role so the auth middleware accepts the probe request.
-      # The health endpoint itself is read-only and returns no secrets.
+      # The /health endpoint is public (no auth) so the container probe works
+      # in both development and production without any credentials.
       test: ["CMD", "python", "-c",
-             "import urllib.request; r=urllib.request.urlopen(urllib.request.Request('http://localhost:8000/api/v1/health',headers={'X-Dev-Role':'VIEWER'}),timeout=5); assert r.status==200"]
+             "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/health',timeout=5); assert r.status==200"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -42,9 +61,12 @@ services:
       - SENTINEL_DATA_MODE=proxy
       - LLM_PROVIDER=${LLM_PROVIDER:-featherless}
       - WORKER_INTERVAL_SECONDS=${WORKER_INTERVAL_SECONDS:-900}
+      - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel_dev}@postgres:5432/sentinel
     volumes:
       - ./journal:/app/journal
     depends_on:
+      postgres:
+        condition: service_healthy
       agent:
         condition: service_started
     restart: unless-stopped
@@ -107,3 +129,6 @@ services:
 secrets:
   grafana_admin_password:
     file: ./secrets/grafana_admin_password.txt
+
+volumes:
+  pg_data:

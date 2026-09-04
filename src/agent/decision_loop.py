@@ -213,13 +213,8 @@ class DecisionLoop:
     here touches a real LLM, Alpaca, or MCP server.
     """
 
-    # Output budget must cover one concise decision per watchlist symbol plus
-    # JSON overhead; a truncated reply is rejected wholesale by validation, so
-    # an undersized budget fails the run closed instead of half-executing it.
-    # Conservative deterministic sampling: low temperature + fixed seed. Both
-    # providers allowlist `seed` in _CHAT_PARAMS (models that reject it
-    # server-side fail closed via the normal error path); the decision loop
-    # stays provider-agnostic — no per-provider branching here.
+    # Allow room for all decisions and JSON overhead.
+    # Fixed sampling keeps runs repeatable across providers.
     DEFAULT_GENERATE_KWARGS: ClassVar[dict[str, Any]] = {
         "temperature": 0.2,
         "max_tokens": 2000,

@@ -1,5 +1,4 @@
-// Demo market ticker — frozen local values; only the visual scroll animates.
-// Nothing here is live data and nothing is presented as live.
+// Frozen demo values. Only the visual scroll is animated.
 
 import { tickerRows } from '../lib/demo'
 

@@ -1,8 +1,4 @@
-/**
- * Professional skeleton placeholder — a subtle shimmer sweep instead of a
- * spinner. The sweep is a transform (GPU-friendly) and collapses to a static
- * block under prefers-reduced-motion via the global stylesheet.
- */
+/** Show a loading placeholder with reduced-motion support. */
 export default function Skeleton({ label = 'Loading content' }: { label?: string }) {
   return (
     <div className="skeleton" role="status" aria-label={label}>

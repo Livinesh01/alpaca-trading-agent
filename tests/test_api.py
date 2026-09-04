@@ -12,7 +12,7 @@ from api.app import app
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("API_AUTH_MODE", "development")
-    # Never let tests try to spawn the risk-guard proxy / reach Alpaca.
+    # Keep tests offline.
     monkeypatch.setenv("SENTINEL_DATA_MODE", "offline")
     return TestClient(app)
 
@@ -40,7 +40,7 @@ def test_health_reuses_safe_observability_state(client):
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] == "req-test"
     data = response.json()["data"]
-    assert data["authentication"] == "development-only"
+    assert data["authentication"] == "development auth"
     assert isinstance(data["kill_switch"], bool)
 
 
@@ -92,9 +92,7 @@ def test_rate_limit_is_structured_and_non_authoritative(client, monkeypatch):
     assert response.json()["code"] == "rate_limited"
 
 
-# ---------------------------------------------------------------------------
-# Phase 10: data-driven endpoints (read-only service layer)
-# ---------------------------------------------------------------------------
+# Read-only data endpoints.
 
 
 class FakeSource:

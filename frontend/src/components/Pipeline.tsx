@@ -5,15 +5,11 @@ import { usePrefersReducedMotion } from '../lib/motion'
 
 const STAGE_ICONS = [Database, LineChart, Sparkles, Cpu, ShieldCheck, Lock, Play]
 
-/** Steps the fully-lit pipeline holds before the loop restarts. */
+/** How long the completed pipeline remains visible. */
 const HOLD_STEPS = 3
 const STEP_MS = 950
 
-/**
- * The visual centerpiece: the decision pipeline animates sequentially to show
- * how an order actually moves — the LLM proposes a direction, Python sizes it,
- * risk validates it, and the final gate (never the model) allows execution.
- */
+/** Show the order path from LLM proposal to final approval. */
 export default function Pipeline() {
   const reduced = usePrefersReducedMotion()
   const [step, setStep] = useState(0)

@@ -1,13 +1,5 @@
-// EPSILON API client.
-//
-// Three explicit wiring states:
-//   DEMO   — VITE_API_BASE_URL is empty: the UI shows clearly-labeled simulated
-//            data (frozen samples). No Alpaca, no network.
-//   ONLINE — VITE_API_BASE_URL is set and the health probe succeeds: all data
-//            comes from the FastAPI server (which proxies the risk-guard path).
-//   OFFLINE— VITE_API_BASE_URL is set but the server is unreachable: explicit
-//            offline state. We NEVER silently fall back to demo data.
-// The browser never calls Alpaca directly and never sees credentials.
+// API client with explicit demo, online, and offline states.
+// The browser never calls Alpaca or receives credentials.
 
 export type Connection = 'demo' | 'online' | 'offline'
 
@@ -211,6 +203,16 @@ export type Health = {
   last_success: string | number | null
   version: string
   authentication: string
+  backend?: string | null
+  database?: string | null
+  worker?: string | null
+  alpaca?: string | null
+  alpaca_paper?: boolean | null
+  last_heartbeat?: string | number | null
+  heartbeat_fresh?: boolean | null
+  auth_mode?: string | null
+  config?: Record<string, unknown> | null
+  config_error?: string | null
 }
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
@@ -252,7 +254,7 @@ async function apiGet<T>(path: string, params?: Record<string, string | number |
 }
 
 function collection<T>(path: string, params?: Record<string, string | number | boolean | undefined>) {
-  // Normalize the envelope: SentinelSource promises non-optional reason/pagination.
+  // Normalize the API response envelope.
   return apiGet<{ items: T[]; available: boolean; reason?: string | null; pagination?: Pagination }>(path, params).then(
     (r): { items: T[]; available: boolean; reason: string | null; pagination: Pagination } => ({
       items: r.data.items,
@@ -305,16 +307,14 @@ export function createApiSource(): SentinelSource {
     },
     getEvaluations: () => collection<EvaluationRecord>('/api/v1/evaluations'),
     getSystem: () => apiGet<SystemInfo>('/api/v1/system').then((r) => r.data),
-    getHealth: () => apiGet<Health>('/api/v1/health').then((r) => r.data),
+    getHealth: () => apiGet<Health>('/health').then((r) => r.data),
   }
 }
 
 export const DEMO_LABEL = 'DEMO / SIMULATED'
 export const WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'SPY', 'TSLA']
 
-// Demo source: deterministic simulated data, labeled everywhere it appears.
-// Never mixed with API data — API mode that fails surfaces OFFLINE rather
-// than silently falling back to these values.
+// Demo data is deterministic and never mixed with API data.
 
 const DEMO_TS = '2026-01-15T14:31:02Z'
 const DEMO_BARS = 30
@@ -535,18 +535,12 @@ export function createDemoSource(): SentinelSource {
   }
 }
 
-/**
- * Single entry point for the app: demo source when no VITE_API_BASE_URL is
- * configured, the real FastAPI source otherwise. API mode that fails
- * surfaces OFFLINE — it never silently falls back to demo data.
- */
+/** Select the demo or API source. */
 export function resolveSource(): SentinelSource {
   return isDemoMode ? createDemoSource() : createApiSource()
 }
 
-// ---------------------------------------------------------------------------
-// Demo watchlist + standalone health probe (used by the app shell).
-// ---------------------------------------------------------------------------
+// Demo watchlist and health probe.
 
 export type DemoSymbolRow = {
   symbol: string

@@ -1,10 +1,8 @@
-// Deterministic demo fixtures for the homepage motion layer.
-// Everything here is frozen: no Math.random, no network, no dates computed at
-// runtime. Every visitor (and every test) always sees the same "market".
+// Frozen demo fixtures. No network, random values, or runtime dates.
 
 import { demoSymbols } from '../api'
 
-/** Small deterministic PRNG (mulberry32) — replaces Math.random everywhere. */
+/** Small deterministic random generator for demo data. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -16,12 +14,12 @@ export function mulberry32(seed: number): () => number {
   }
 }
 
-// --- Ticker ----------------------------------------------------------------
+// Ticker data.
 
 /** Frozen quote rows for the demo ticker (mirrors api.ts demoSymbols). */
 export const tickerRows = demoSymbols.map(({ symbol, price, change }) => ({ symbol, price, change }))
 
-// --- Price chart -----------------------------------------------------------
+// Price chart data.
 
 export type Timeframe = '1D' | '1W' | '1M'
 export type ChartPoint = { label: string; price: number }
@@ -50,11 +48,7 @@ const TF_CONFIG: Record<Timeframe, { points: number; seed: number; bias: number;
   '1M': { points: 72, seed: 23, bias: 0.46, labeler: monthLabel },
 }
 
-/**
- * Deterministic price series ending exactly at the frozen demo close.
- * Built by walking backwards from the last price, so the shape is stable and
- * the series always terminates at the demo value.
- */
+/** Build a stable price series ending at the demo close. */
 export function demoSeries(timeframe: Timeframe): ChartPoint[] {
   const cfg = TF_CONFIG[timeframe]
   const rand = mulberry32(cfg.seed)
@@ -68,7 +62,7 @@ export function demoSeries(timeframe: Timeframe): ChartPoint[] {
   return prices.map((price, i) => ({ label: cfg.labeler(i, cfg.points), price: Math.round(price * 100) / 100 }))
 }
 
-// --- Pipeline --------------------------------------------------------------
+// Pipeline data.
 
 export type PipelineStage = {
   key: string
@@ -78,11 +72,7 @@ export type PipelineStage = {
   status: string
 }
 
-/**
- * Ordered decision pipeline — mirrors the backend replay stages in api.ts.
- * The visual order reinforces the architecture: the LLM only ever proposes a
- * direction; Python sizes, risk validates, and the final gate approves.
- */
+/** Ordered decision pipeline used by the demo. */
 export const PIPELINE_STAGES: PipelineStage[] = [
   { key: 'market-data', label: 'MARKET DATA', authority: 'PYTHON', purpose: 'Fresh OHLCV snapshot for every watchlist symbol.', status: 'Fresh fixture' },
   { key: 'signals', label: 'TECHNICAL SIGNALS', authority: 'PYTHON', purpose: 'Trend, momentum, volatility and RSI states computed in code.', status: 'Calculated' },
@@ -93,12 +83,12 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   { key: 'execution', label: 'PAPER EXECUTION', authority: 'SYSTEM', purpose: 'Simulated fill in paper mode. No Alpaca order endpoint is connected.', status: 'Simulated' },
 ]
 
-// --- Activity timeline -------------------------------------------------------
+// Activity timeline data.
 
 export type TimelineTone = 'green' | 'blue' | 'amber' | 'slate'
 export type TimelineEvent = { time: string; title: string; detail: string; tone: TimelineTone; icon: string }
 
-/** One simulated agent run, frozen in time — mirrors demoActivity in api.ts. */
+/** One frozen simulated agent run. */
 export const DEMO_TIMELINE: TimelineEvent[] = [
   { time: '09:31:02', title: 'Market snapshot received', detail: '5 symbols · fresh within 12 seconds', tone: 'slate', icon: 'activity' },
   { time: '09:31:02', title: 'Technical signals calculated', detail: 'Trend, momentum, volatility, RSI states', tone: 'blue', icon: 'bars' },
@@ -109,9 +99,9 @@ export const DEMO_TIMELINE: TimelineEvent[] = [
   { time: '09:31:04', title: 'Paper execution simulated', detail: 'MSFT · 4 shares · simulated fill', tone: 'green', icon: 'play' },
 ]
 
-// --- Risk posture ----------------------------------------------------------
+// Risk posture data.
 
-/** Derived from demoRisk + the demo account in api.ts (4648.68 / 26180.40). */
+/** Demo risk values derived from the demo account. */
 export const DEMO_RISK = {
   exposure: 17.8,
   concentration: 11.1,

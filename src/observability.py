@@ -56,7 +56,7 @@ class Observability:
                 self.directory.mkdir(parents=True, exist_ok=True)
                 with self.events_path.open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps(redacted, sort_keys=True, separators=(",", ":")) + "\n")
-            except Exception as exc:  # noqa: BLE001 — observability must never affect execution
+            except Exception as exc:  # noqa: BLE001 - observability cannot stop execution
                 del exc
             self.counters[event_type] += 1
             if event_type.endswith("failure"):

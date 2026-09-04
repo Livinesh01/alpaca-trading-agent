@@ -1,10 +1,4 @@
-/* ============================================================================
-  EPSILON — AI trading terminal stylesheet
-   Design language: institutional, calm, precise. Ink/teal palette, DM Mono for
-   numerics and system labels, Manrope for UI copy. Motion budget: 150–300ms
-   transitions, GPU-friendly transforms/opacity only, and every decorative
-   animation flattens to an instant, static state under prefers-reduced-motion.
-   ========================================================================== */
+/* Epsilon trading terminal styles. */
 
 :root {
   font-family: Manrope, ui-sans-serif, sans-serif;
@@ -31,7 +25,7 @@ button, input { font: inherit }
 button { cursor: pointer }
 :focus-visible { outline: 2px solid #14957f; outline-offset: 2px }
 
-/* --- Shell ---------------------------------------------------------------- */
+/* Shell. */
 
 .app-shell { min-height: 100vh; overflow-x: hidden; background: linear-gradient(135deg, #f4f7f7 0%, #eef2f4 48%, #e8edef 100%) }
 
@@ -78,7 +72,7 @@ button { cursor: pointer }
 }
 .amber-dot { background: #e0a65d }
 
-/* --- Sidebar / navigation ------------------------------------------------- */
+/* Sidebar and navigation. */
 
 .workspace { display: flex; min-height: calc(100vh - 68px) }
 
@@ -113,7 +107,7 @@ button { cursor: pointer }
 .system-chip strong, .system-chip span { display: block; font-size: 11px }
 .system-chip span { color: var(--muted); font-size: 10px; margin-top: 3px }
 
-/* --- Main column ---------------------------------------------------------- */
+/* Main column. */
 
 .main-content { max-width: 1500px; min-width: 0; width: 100%; padding: 35px 42px 50px; margin: 0 auto }
 
@@ -140,7 +134,7 @@ button { cursor: pointer }
 .secondary-button:active, .primary-button:active { transform: translateY(1px) }
 .primary-button:active { box-shadow: 0 1px 0 #0b514d }
 
-/* --- Hero + animated market backdrop -------------------------------------- */
+/* Hero and market backdrop. */
 
 .hero-strip {
   background: #17313a; color: #f7faf8; border-radius: 8px; padding: 30px 34px;
@@ -219,7 +213,7 @@ button { cursor: pointer }
   100% { box-shadow: 0 0 0 0 rgba(143, 224, 200, 0); opacity: .9 }
 }
 
-/* --- Demo ticker ----------------------------------------------------------- */
+/* Demo ticker. */
 
 .ticker {
   display: flex; align-items: stretch; margin-top: 13px;
@@ -249,7 +243,7 @@ button { cursor: pointer }
   to { transform: translateX(-50%) }
 }
 
-/* --- Metrics + panels ------------------------------------------------------ */
+/* Metrics and panels. */
 
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 13px 0 }
 .metric {
@@ -285,7 +279,7 @@ button { cursor: pointer }
 }
 .quiet-button:hover { color: #0c5b54 }
 
-/* --- Pipeline --------------------------------------------------------------- */
+/* Pipeline. */
 
 .pipeline-panel { margin-top: 13px }
 .pipeline-header { flex-wrap: wrap; gap: 6px 14px }
@@ -321,8 +315,7 @@ button { cursor: pointer }
   50% { box-shadow: 0 0 0 7px rgba(20, 149, 127, .07) }
 }
 
-/* Authority color coding: the LLM stage is the only amber node — it decides
-   direction and nothing else. Everything downstream stays teal (Python/SYSTEM). */
+/* Amber marks the LLM proposal; teal marks system controls. */
 .stage.auth-llm .stage-node { color: #a4711f; border-color: #d9b98a; background: #faf3e6 }
 .stage.auth-llm.done .stage-node { background: #f3e7cf; border-color: #d9b98a; color: #a4711f }
 .stage.auth-llm.active .stage-node {
@@ -360,7 +353,7 @@ button { cursor: pointer }
 }
 .stage.auth-llm .stage-detail em { color: #e7bb75 }
 
-/* --- Watchlist table -------------------------------------------------------- */
+/* Watchlist table. */
 
 .table-tools { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 7px }
 .search-field {
@@ -393,7 +386,7 @@ tbody tr:hover { background: #f4f8f7 }
 .signal.hold { color: #8b6e43 }
 .signal.hold span { background: #cf9b4c }
 
-/* --- Decision card ----------------------------------------------------------- */
+/* Decision card. */
 
 .decision-panel { padding-bottom: 4px }
 .decision-symbol { display: flex; justify-content: space-between; align-items: center; padding: 21px 21px 5px }
@@ -430,7 +423,7 @@ tbody tr:hover { background: #f4f8f7 }
 .reveal.r2 { animation-delay: .85s }
 .reveal.r3 { animation-delay: 1.15s }
 
-/* --- Demo price chart --------------------------------------------------------- */
+/* Demo price chart. */
 
 .chart-panel { display: flex; flex-direction: column }
 .chart-header { align-items: flex-start; gap: 10px; flex-wrap: wrap }
@@ -463,7 +456,7 @@ tbody tr:hover { background: #f4f8f7 }
 @keyframes chart-draw { to { stroke-dashoffset: 0 } }
 @keyframes fade-in { to { opacity: 1 } }
 
-/* --- Activity timeline --------------------------------------------------------- */
+/* Activity timeline. */
 
 .timeline-panel { display: flex; flex-direction: column }
 .timeline { flex: 1 }
@@ -487,7 +480,7 @@ tbody tr:hover { background: #f4f8f7 }
   color: var(--muted); font-size: 9px; font-family: var(--mono); letter-spacing: .04em;
 }
 
-/* --- Risk posture --------------------------------------------------------------- */
+/* Risk posture. */
 
 .risk-posture { margin-top: 13px }
 .risk-status {
@@ -515,7 +508,7 @@ tbody tr:hover { background: #f4f8f7 }
 .risk-list div { display: flex; align-items: center; gap: 8px; padding: 9px 0; font-size: 10px; color: #67757d }
 .risk-list strong { margin-left: auto; color: #33434b }
 
-/* --- Skeletons -------------------------------------------------------------------- */
+/* Loading skeletons. */
 
 .skeleton { padding: 20px 6px; display: flex; flex-direction: column; gap: 13px; min-height: 205px; justify-content: center }
 .skeleton-row { position: relative; height: 12px; border-radius: 5px; background: #e8eeee; overflow: hidden }
@@ -526,7 +519,7 @@ tbody tr:hover { background: #f4f8f7 }
 }
 @keyframes shimmer { to { transform: translateX(100%) } }
 
-/* --- Demo notice + placeholders ------------------------------------------------------ */
+/* Demo notice and placeholders. */
 
 .demo-notice {
   margin-top: 15px; padding: 11px 14px; border: 1px solid #d7c7a7; background: #fbf7ed; color: #78633e;
@@ -557,17 +550,14 @@ tbody tr:hover { background: #f4f8f7 }
 .mini-table span:nth-child(3) { text-align: right }
 .mini-table .signal { justify-self: end }
 
-/* --- Shared keyframes ------------------------------------------------------------------ */
+/* Shared animations. */
 
 @keyframes dot-pulse {
   0%, 100% { box-shadow: 0 0 0 3px rgba(72, 180, 157, .13) }
   50% { box-shadow: 0 0 0 5px rgba(72, 180, 157, .24) }
 }
 
-/* --- Reduced motion (mandatory) -----------------------------------------------------------
-   Every animation collapses to its end state instantly and loops once; delays are
-   zeroed so nothing fades in late. JS-driven loops (pipeline stepper, confidence
-   counter) check the same media query via usePrefersReducedMotion(). */
+/* Reduced motion. */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -584,7 +574,7 @@ tbody tr:hover { background: #f4f8f7 }
   .status-dot.live, .green-dot, .risk-status-dot, .stage.active .stage-node, .stage.auth-llm.active .stage-node { animation: none }
 }
 
-/* --- Responsive ---------------------------------------------------------------------------- */
+/* Responsive layout. */
 
 @media (max-width: 1100px) {
   .hero-strip h2 { font-size: 32px }
@@ -610,7 +600,7 @@ tbody tr:hover { background: #f4f8f7 }
   .metric-grid { grid-template-columns: repeat(2, 1fr) }
   .content-grid { grid-template-columns: 1fr }
 
-  /* Pipeline collapses to a vertical timeline */
+  /* Stack the pipeline vertically. */
   .pipeline { flex-direction: column; padding: 20px 20px 8px }
   .stage { flex-direction: row; align-items: flex-start }
   .stage-rail { flex-direction: column; align-items: center; width: 30px; height: auto; flex: none }

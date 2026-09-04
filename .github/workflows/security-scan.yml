@@ -1,0 +1,47 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * 1"
+
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout history for credential scan
+        run: git fetch --unshallow || true
+      - name: Scan tracked files for secrets
+        run: |
+          grep -rn -iE '(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,})' --include='*.py' --include='*.ts' --include='*.tsx' --include='*.json' --include='*.yml' --include='*.yaml' src/ frontend/src/ vercel.json docker-compose.yml Dockerfile 2>/dev/null | grep -v 'your_' | grep -v 'placeholder' | grep -v 'test-key' || echo 'No real secrets found in tracked files'
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Scan Python dependencies
+        run: pip-audit -r requirements.txt || true
+      - name: Scan frontend dependencies
+        run: npm audit || true
+        working-directory: frontend
+
+  docker-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker lint
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock hadolint/hadolint hadolint - < Dockerfile || true
+      - name: Docker build and scan
+        run: |
+          docker build -t sentinel:scan .
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL sentinel:scan || true

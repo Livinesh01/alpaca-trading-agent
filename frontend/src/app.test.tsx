@@ -11,7 +11,7 @@ test('renders safety-first demo terminal', () => {
 
 test('homepage shows pipeline, ticker, risk posture, and honest demo labels', () => {
   render(<App />)
-  // Decision pipeline — the architecture is the differentiator
+  // The decision pipeline is visible.
   expect(screen.getAllByText('MARKET DATA').length).toBeGreaterThan(0)
   expect(screen.getByText('TECHNICAL SIGNALS')).toBeTruthy()
   expect(screen.getByText('AI DECISION')).toBeTruthy()
@@ -19,14 +19,14 @@ test('homepage shows pipeline, ticker, risk posture, and honest demo labels', ()
   expect(screen.getByText('RISK CHECK')).toBeTruthy()
   expect(screen.getByText('FINAL GATE')).toBeTruthy()
   expect(screen.getByText('PAPER EXECUTION')).toBeTruthy()
-  // Ticker labeled as demo, never live
+  // The ticker is labeled as demo.
   expect(screen.getByText('DEMO MARKET DATA')).toBeTruthy()
   expect(screen.queryByText(/live orders/i)).toBeNull()
   expect(screen.queryByText(/real-time execution/i)).toBeNull()
-  // Risk posture visible and calm
+  // Risk posture is visible.
   expect(screen.getAllByText('SAFE').length).toBeGreaterThan(0)
   expect(screen.getByText('Risk posture')).toBeTruthy()
-  // Decision card states deterministic demo values
+  // Demo decision values are shown.
   expect(screen.getByText('4 shares')).toBeTruthy()
 })
 

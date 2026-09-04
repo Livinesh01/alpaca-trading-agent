@@ -24,8 +24,7 @@ from errors import (
     LLMTimeoutError,
 )
 
-# Local dotenv loading is opt-in. Deployment workers must receive secrets from
-# their process environment or secret manager, never an arbitrary workspace file.
+# Load dotenv only when requested. Production uses environment secrets.
 if os.environ.get("SENTINEL_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
@@ -60,9 +59,7 @@ def generate(provider: LLMProvider, prompt: str, **kwargs: Any) -> LLMResponse:
     return provider.generate(prompt, **kwargs)
 
 
-# --- Structured provider failure taxonomy ---
-# LLMError, LLMTimeoutError, LLMProviderError, LLMInvalidResponse, LLMExhaustedError
-# are defined in src/errors.py and imported above.
+# Provider error classes are defined in src/errors.py.
 
 
 def _classify_exception(exc: Exception) -> tuple[str, bool]:

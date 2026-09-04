@@ -12,11 +12,7 @@ const PAD_B = 26
 
 const TIMEFRAMES: Timeframe[] = ['1D', '1W', '1M']
 
-/**
- * Animated demo price chart. One frozen deterministic series per timeframe
- * (ends exactly at the demo close). The path draws in once per timeframe
- * change; hover shows a crosshair and tooltip. Nothing is real-time data.
- */
+/** Show a deterministic demo price chart. */
 export default function PriceChart() {
   const [tf, setTf] = useState<Timeframe>('1D')
   const [hover, setHover] = useState<number | null>(null)

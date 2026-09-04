@@ -20,5 +20,7 @@ smoke*.err
 smoke*.py
 tmp_*
 pytest_*.txt
+logs/
+tmp/
 .env*
 !.env.example

@@ -14,8 +14,7 @@ from typing import Any
 from api.services.data_source import MarketDataSource
 from api.services.utils import num
 
-# Raw Alpaca order status -> conservative display state. "FILLED" is asserted
-# only when the server confirms the fill; anything else is never labeled filled.
+# Show FILLED only when Alpaca confirms the fill.
 _FILL_STATUSES = frozenset({"filled"})
 _FAIL_STATUSES = frozenset({"rejected", "canceled", "cancelled", "expired", "suspended", "stopped"})
 _OPEN_STATUSES = frozenset({"new", "accepted", "held", "pending_new", "pending_cancel", "pending_replace"})

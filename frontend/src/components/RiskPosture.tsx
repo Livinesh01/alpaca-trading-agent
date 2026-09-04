@@ -9,10 +9,7 @@ const BARS = [
   { label: 'Risk usage', value: DEMO_RISK.utilization },
 ]
 
-/**
- * Safety-first visualization: calm bars, a quiet SAFE status, and the
- * deterministic controls listed underneath. Safety outranks excitement here.
- */
+/** Show the current risk posture and controls. */
 export default function RiskPosture() {
   const reduced = usePrefersReducedMotion()
   const [grown, setGrown] = useState(reduced)

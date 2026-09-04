@@ -3,10 +3,7 @@ import MarketBackdrop from './MarketBackdrop'
 
 const FLOW = ['Analyze markets', 'Reason with AI', 'Size deterministically', 'Validate risk', 'Execute safely']
 
-/**
- * Homepage hero. States the product identity and the safety contract, with
- * explicit PAPER TRADING / DEMO / SIMULATED badges — never "live" anything.
- */
+/** Show the product identity and paper-trading status. */
 export default function Hero() {
   return (
     <section className="hero-strip hero-home">

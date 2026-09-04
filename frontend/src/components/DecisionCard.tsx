@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bot, Check, ShieldCheck } from 'lucide-react'
 import { cancelRaf, raf, usePrefersReducedMotion } from '../lib/motion'
 
-// Deterministic demo decision (api.ts demo-decision-msft). Values are frozen —
-// the card animates how they appear, never what they are.
+// Frozen demo decision. Only its presentation is animated.
 const CONFIDENCE = 78
 const COUNT_MS = 1100
 

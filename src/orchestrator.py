@@ -113,13 +113,11 @@ def extract_error_message(output: str) -> str:
 
 VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD"})
 
-# Canonical structured-decision contract (Phase 3): the ONLY fields a single
-# decision may carry. Anything extra is rejected, never silently dropped.
+# Allowed fields for one structured decision. Extra fields are rejected.
 CANONICAL_DECISION_FIELDS = frozenset(
     {"symbol", "action", "confidence", "position_size", "thesis", "entry_reason"}
 )
-# Upper bound on reasoning text: runaway / absurdly long outputs are rejected
-# (generous above the prompt's 12-word guidance, far below token-runaway sizes).
+# Reject excessively long reasoning text.
 MAX_DECISION_REASONING_WORDS = 120
 
 
