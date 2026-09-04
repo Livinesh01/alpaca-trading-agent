@@ -306,10 +306,17 @@ class NVIDIAProvider:
     which never overrides real env vars); NVIDIA_MODEL defaults to
     `NVIDIAProvider.DEFAULT_MODEL`. An API key never appears in any raised
     exception.
+
+    NVIDIA-specific parameters (extra_body, stream) are supported via kwargs.
+    The `extra_body` dict is passed directly to the OpenAI SDK and can contain
+    NVIDIA-specific options like `chat_template_kwargs`.
     """
 
     DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
     DEFAULT_MODEL = "deepseek-ai/deepseek-v4-pro-0813"
+    DEFAULT_TEMPERATURE = 1.0
+    DEFAULT_TOP_P = 0.95
+    DEFAULT_MAX_TOKENS = 16384
     _CHAT_PARAMS = (
         "temperature",
         "max_tokens",
@@ -319,7 +326,9 @@ class NVIDIAProvider:
         "presence_penalty",
         "frequency_penalty",
         "logit_bias",
+        "stream",
     )
+    _NVIDIA_PARAMS = ("extra_body",)
     _REASONING_EFFORTS = frozenset({"none", "high", "max"})
 
     def __init__(
@@ -329,6 +338,11 @@ class NVIDIAProvider:
         model: str | None = None,
         client: Any | None = None,
         base_url: str = DEFAULT_BASE_URL,
+        temperature: float = DEFAULT_TEMPERATURE,
+        top_p: float = DEFAULT_TOP_P,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        seed: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
         self.api_key: str | None = api_key if api_key is not None else os.environ.get("NVIDIA_API_KEY")
         if not self.api_key:
@@ -342,6 +356,13 @@ class NVIDIAProvider:
             self.model = env_model or self.DEFAULT_MODEL
         self.base_url = base_url
 
+        # NVIDIA-specific defaults
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_tokens = max_tokens
+        self.seed = seed
+        self.extra_body = extra_body
+
         if client is not None:
             self._client = client
         else:
@@ -354,29 +375,58 @@ class NVIDIAProvider:
                 ) from exc
             self._client = OpenAI(base_url=self.base_url, api_key=self.api_key)
 
-    def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
-        unknown = set(kwargs).difference(self._CHAT_PARAMS).difference({"reasoning_effort"})
+    def generate(self, prompt: str, **kwargs: Any) -> Any:
+        """Generate a completion with NVIDIA-specific parameter support.
+
+        Supports all standard chat params plus:
+        - stream: bool (default False) — enable streaming responses
+        - extra_body: dict — NVIDIA-specific options like chat_template_kwargs
+        - reasoning_effort: str — one of "none", "high", "max"
+        """
+        nvidia_kwargs = {k: v for k, v in kwargs.items() if k in self._NVIDIA_PARAMS}
+        standard_kwargs = {k: v for k, v in kwargs.items() if k not in self._NVIDIA_PARAMS}
+
+        unknown = set(standard_kwargs).difference(self._CHAT_PARAMS).difference({"reasoning_effort"})
         if unknown:
             raise TypeError(f"unsupported generate() kwargs: {sorted(unknown)}")
 
-        if "reasoning_effort" in kwargs and kwargs["reasoning_effort"] not in self._REASONING_EFFORTS:
+        if "reasoning_effort" in standard_kwargs and standard_kwargs["reasoning_effort"] not in self._REASONING_EFFORTS:
             raise ValueError(
                 "unsupported reasoning_effort "
-                f"{kwargs['reasoning_effort']!r}; expected one of "
+                f"{standard_kwargs['reasoning_effort']!r}; expected one of "
                 f"{sorted(self._REASONING_EFFORTS)}"
             )
 
+        # Use instance defaults unless overridden in kwargs
         params: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
+            "temperature": standard_kwargs.get("temperature", self.temperature),
+            "top_p": standard_kwargs.get("top_p", self.top_p),
+            "max_tokens": standard_kwargs.get("max_tokens", self.max_tokens),
+            "stream": standard_kwargs.get("stream", False),
         }
-        for name in (*self._CHAT_PARAMS, "reasoning_effort"):
-            if name in kwargs:
-                params[name] = kwargs[name]
+
+        # Add optional seed if set
+        if "seed" in standard_kwargs:
+            params["seed"] = standard_kwargs["seed"]
+        elif self.seed is not None:
+            params["seed"] = self.seed
+
+        # Add other standard params
+        for name in ("stop", "presence_penalty", "frequency_penalty", "logit_bias", "reasoning_effort"):
+            if name in standard_kwargs:
+                params[name] = standard_kwargs[name]
+
+        # Add NVIDIA-specific extra_body
+        if "extra_body" in nvidia_kwargs:
+            params["extra_body"] = nvidia_kwargs["extra_body"]
+        elif self.extra_body is not None:
+            params["extra_body"] = self.extra_body
 
         try:
             completion = self._client.chat.completions.create(**params)
-        except Exception as exc:  # mapped to a redacted RuntimeError below
+        except Exception as exc:
             raise RuntimeError(f"NVIDIA API error: {self._redact(str(exc))}") from exc
 
         text = ""

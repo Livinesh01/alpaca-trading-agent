@@ -319,3 +319,73 @@ def test_nvidia_rejects_unsupported_kwargs(monkeypatch):
 def test_nvidia_conforms_to_protocol():
     provider = NVIDIAProvider(api_key="sk-test", client=mock.Mock())
     assert isinstance(provider, LLMProvider)
+
+
+def test_nvidia_supports_extra_body(monkeypatch):
+    """NVIDIA-specific extra_body (e.g., chat_template_kwargs) is forwarded."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-test")
+    client = mock.Mock()
+    client.chat.completions.create.return_value = _completion("ok")
+
+    extra_body = {"chat_template_kwargs": {"thinking": False}}
+    provider = NVIDIAProvider(client=client, extra_body=extra_body)
+    provider.generate("q")
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["extra_body"] == extra_body
+
+
+def test_nvidia_supports_stream_parameter(monkeypatch):
+    """stream parameter is forwarded to the API."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-test")
+    client = mock.Mock()
+    client.chat.completions.create.return_value = _completion("ok")
+
+    provider = NVIDIAProvider(client=client)
+    provider.generate("q", stream=True)
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["stream"] is True
+
+
+def test_nvidia_default_parameters(monkeypatch):
+    """NVIDIA-specific defaults (temperature, top_p, max_tokens) are applied."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-test")
+    client = mock.Mock()
+    client.chat.completions.create.return_value = _completion("ok")
+
+    provider = NVIDIAProvider(client=client)
+    provider.generate("q")
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["temperature"] == NVIDIAProvider.DEFAULT_TEMPERATURE
+    assert kwargs["top_p"] == NVIDIAProvider.DEFAULT_TOP_P
+    assert kwargs["max_tokens"] == NVIDIAProvider.DEFAULT_MAX_TOKENS
+    assert kwargs["stream"] is False
+
+
+def test_nvidia_seed_parameter(monkeypatch):
+    """seed parameter is forwarded when set."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-test")
+    client = mock.Mock()
+    client.chat.completions.create.return_value = _completion("ok")
+
+    provider = NVIDIAProvider(client=client, seed=42)
+    provider.generate("q")
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["seed"] == 42
+
+
+def test_nvidia_extra_body_via_generate_kwargs(monkeypatch):
+    """extra_body can be passed via generate() kwargs."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-test")
+    client = mock.Mock()
+    client.chat.completions.create.return_value = _completion("ok")
+
+    provider = NVIDIAProvider(client=client)
+    extra_body = {"chat_template_kwargs": {"thinking": False}}
+    provider.generate("q", extra_body=extra_body)
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["extra_body"] == extra_body
