@@ -7,14 +7,14 @@ memory) and raises explicitly for authoritative records when the caller must
 fail closed.
 
 Database failures MUST NOT cause unsafe trading behavior: the trading path only
-uses `claim_idempotency_guard` for duplicate protection (fail-open on DB outage
-because Alpaca-side `client_order_id` remains the authority) and never blocks a
-risk decision on DB availability.
+uses `claim_idempotency_guard` for duplicate protection. On DB outage, the system
+requires broker-side idempotency reconciliation via Alpaca client_order_id.
 """
 
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from db import (
@@ -27,12 +27,18 @@ from db import (
     RiskEvent,
     SystemHealth,
     WorkerHeartbeat,
+    WorkerLease,
     db_session,
+    get_session,
 )
 
 
 def _now_epoch() -> float:
     return time.time()
+
+
+def _now_datetime() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def is_db_configured() -> bool:
@@ -72,11 +78,12 @@ def save_worker_heartbeat(
             record.current_state = state
             record.version = version
             record.started_at = _datetime_from_epoch(started_at)
-            record.last_heartbeat = last_heartbeat
-            record.last_cycle_started = last_cycle_started
-            record.last_cycle_completed = last_cycle_completed
-            record.last_success = last_success
+            record.last_heartbeat = _datetime_from_epoch(last_heartbeat)
+            record.last_cycle_started = _datetime_or_none(last_cycle_started)
+            record.last_cycle_completed = _datetime_or_none(last_cycle_completed)
+            record.last_success = _datetime_or_none(last_success)
             record.last_error = last_error
+            record.updated_at = _now_datetime()
         return True
     except Exception:  # noqa: BLE001 — heartbeat persistence is best-effort
         return False
@@ -88,8 +95,6 @@ def latest_worker_heartbeat(worker_id: str | None = None) -> dict[str, Any] | No
         return None
     try:
         from sqlalchemy import select
-
-        from db import get_session
 
         with get_session() as session:
             stmt = select(WorkerHeartbeat).order_by(WorkerHeartbeat.last_heartbeat.desc())
@@ -103,13 +108,143 @@ def latest_worker_heartbeat(worker_id: str | None = None) -> dict[str, Any] | No
                 "current_state": row.current_state,
                 "version": row.version,
                 "started_at": _epoch_or_none(row.started_at),
-                "last_heartbeat": row.last_heartbeat,
-                "last_cycle_started": row.last_cycle_started,
-                "last_cycle_completed": row.last_cycle_completed,
-                "last_success": row.last_success,
+                "last_heartbeat": _epoch_or_none(row.last_heartbeat),
+                "last_cycle_started": _epoch_or_none(row.last_cycle_started),
+                "last_cycle_completed": _epoch_or_none(row.last_cycle_completed),
+                "last_success": _epoch_or_none(row.last_success),
                 "last_error": row.last_error,
             }
     except Exception:  # noqa: BLE001 — heartbeat reads are best-effort
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Worker Lease / Leader Election
+# ---------------------------------------------------------------------------
+
+
+def acquire_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> bool:
+    """Acquire the worker lease for leader election.
+    
+    Returns True if lease acquired or renewed by this worker.
+    Returns False if another worker holds a valid lease.
+    """
+    if not is_db_configured():
+        return True  # No DB = single worker mode (development)
+    
+    try:
+        from sqlalchemy import select
+        
+        with db_session() as session:
+            now = _now_datetime()
+            
+            # Check for existing valid lease
+            stmt = select(WorkerLease).where(
+                WorkerLease.is_active == True,
+                WorkerLease.expires_at > now,
+            )
+            existing = session.scalars(stmt).first()
+            
+            if existing is not None:
+                if existing.worker_id == worker_id:
+                    # Renew our own lease
+                    existing.expires_at = now + __import__("datetime").timedelta(seconds=lease_expiry_seconds)
+                    existing.last_renewed_at = now
+                    return True
+                else:
+                    # Another worker holds the lease
+                    return False
+            
+            # No valid lease - acquire it
+            lease = WorkerLease(
+                worker_id=worker_id,
+                acquired_at=now,
+                expires_at=now + __import__("datetime").timedelta(seconds=lease_expiry_seconds),
+                last_renewed_at=now,
+                is_active=True,
+            )
+            session.add(lease)
+            return True
+    except Exception:
+        return False  # Fail closed - don't run if lease can't be acquired
+
+
+def renew_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> bool:
+    """Renew the worker lease."""
+    if not is_db_configured():
+        return True
+    
+    try:
+        from sqlalchemy import select
+        
+        with db_session() as session:
+            now = _now_datetime()
+            
+            stmt = select(WorkerLease).where(
+                WorkerLease.worker_id == worker_id,
+                WorkerLease.is_active == True,
+            )
+            lease = session.scalars(stmt).first()
+            
+            if lease is None:
+                return False
+            
+            lease.expires_at = now + __import__("datetime").timedelta(seconds=lease_expiry_seconds)
+            lease.last_renewed_at = now
+            return True
+    except Exception:
+        return False
+
+
+def release_worker_lease(*, worker_id: str) -> bool:
+    """Release the worker lease."""
+    if not is_db_configured():
+        return True
+    
+    try:
+        from sqlalchemy import select
+        
+        with db_session() as session:
+            stmt = select(WorkerLease).where(
+                WorkerLease.worker_id == worker_id,
+                WorkerLease.is_active == True,
+            )
+            lease = session.scalars(stmt).first()
+            
+            if lease is not None:
+                lease.is_active = False
+                lease.released_at = _now_datetime()
+            return True
+    except Exception:
+        return False
+
+
+def get_active_lease() -> dict[str, Any] | None:
+    """Get the currently active worker lease."""
+    if not is_db_configured():
+        return None
+    
+    try:
+        from sqlalchemy import select
+        
+        with get_session() as session:
+            now = _now_datetime()
+            stmt = select(WorkerLease).where(
+                WorkerLease.is_active == True,
+                WorkerLease.expires_at > now,
+            ).order_by(WorkerLease.expires_at.desc())
+            
+            lease = session.scalars(stmt).first()
+            if lease is None:
+                return None
+            
+            return {
+                "worker_id": lease.worker_id,
+                "acquired_at": _epoch_or_none(lease.acquired_at),
+                "expires_at": _epoch_or_none(lease.expires_at),
+                "last_renewed_at": _epoch_or_none(lease.last_renewed_at),
+            }
+    except Exception:
         return None
 
 
@@ -325,12 +460,21 @@ def claim_idempotency_guard(key: str, *, run_id: str, decision_id: str, symbol: 
     """Atomically claim an idempotency key.
 
     Returns ``"completed"`` on the first claim and ``"rejected_duplicate"`` when
-    the key already exists. Fails open (returns ``"completed"``) when the DB is
-    unavailable so a degraded database never blocks a paper order that Alpaca
-    itself will de-duplicate via ``client_order_id``.
+    the key already exists. 
+    
+    IMPORTANT: When DB is unavailable, returns ``"db_unavailable"`` to signal
+    the caller MUST perform broker-side reconciliation via Alpaca client_order_id
+    before submitting any order. This prevents duplicate orders during DB outages.
+    
+    The caller is responsible for:
+    1. Checking if DB claims the key
+    2. If DB unavailable, querying Alpaca for existing orders with the same client_order_id
+    3. Only submitting if no existing order is found
     """
     if not is_db_configured():
-        return "completed"
+        # No DB configured - signal that broker-side reconciliation is required
+        return "db_unavailable"
+    
     try:
         with db_session() as session:
             existing = session.get(IdempotencyState, key)
@@ -346,11 +490,52 @@ def claim_idempotency_guard(key: str, *, run_id: str, decision_id: str, symbol: 
                     side=str(side).lower(),
                     qty=float(qty),
                     status="completed",
+                    created_at=_now_datetime(),
                 )
             )
         return "completed"
-    except Exception:  # noqa: BLE001 — fail open; Alpaca client_order_id is the authority
-        return "completed"
+    except Exception:  # noqa: BLE001
+        # DB error - signal that broker-side reconciliation is required
+        # DO NOT fail open - this prevents duplicate orders during DB outages
+        return "db_unavailable"
+
+
+def check_idempotency_status(key: str) -> dict[str, Any] | None:
+    """Check the status of an idempotency key without claiming it."""
+    if not is_db_configured():
+        return None
+    try:
+        with get_session() as session:
+            record = session.get(IdempotencyState, key)
+            if record is None:
+                return None
+            return {
+                "idempotency_key": record.idempotency_key,
+                "run_id": record.run_id,
+                "decision_id": record.decision_id,
+                "execution_id": record.execution_id,
+                "symbol": record.symbol,
+                "side": record.side,
+                "qty": record.qty,
+                "status": record.status,
+                "created_at": _epoch_or_none(record.created_at),
+            }
+    except Exception:
+        return None
+
+
+def update_idempotency_execution(key: str, execution_id: str) -> bool:
+    """Update the execution_id for an idempotency record after order submission."""
+    if not is_db_configured():
+        return False
+    try:
+        with db_session() as session:
+            record = session.get(IdempotencyState, key)
+            if record is not None:
+                record.execution_id = execution_id
+            return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +549,12 @@ def _datetime_from_epoch(value: float) -> Any:
     return datetime.fromtimestamp(float(value), tz=timezone.utc)
 
 
+def _datetime_or_none(value: float | None) -> Any:
+    if value is None:
+        return None
+    return _datetime_from_epoch(value)
+
+
 def _epoch_or_none(value: Any) -> float | None:
     if value is None:
         return None
@@ -372,7 +563,10 @@ def _epoch_or_none(value: Any) -> float | None:
 
 
 __all__ = [
+    "acquire_worker_lease",
+    "check_idempotency_status",
     "claim_idempotency_guard",
+    "get_active_lease",
     "is_db_configured",
     "latest_worker_heartbeat",
     "record_agent_event",
@@ -382,5 +576,8 @@ __all__ = [
     "record_order",
     "record_risk_event",
     "record_system_health",
+    "release_worker_lease",
+    "renew_worker_lease",
     "save_worker_heartbeat",
+    "update_idempotency_execution",
 ]

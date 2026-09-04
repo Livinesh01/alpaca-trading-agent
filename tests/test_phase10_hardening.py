@@ -180,7 +180,8 @@ def test_public_health_requires_fresh_worker_heartbeat(monkeypatch, tmp_path):
     monkeypatch.setenv("PAPER_TRADING", "true")
     monkeypatch.setenv("SENTINEL_DATA_MODE", "proxy")
     monkeypatch.setattr(api_app, "WORKER_STATUS_PATH", str(worker_path))
-    assert api_app._public_health()["heartbeat_fresh"] is False
+    health = api_app._public_health()
+    assert health["worker"]["heartbeat_fresh"] is False
 
 
 # ===========================================================================

@@ -168,15 +168,28 @@ class WorkerHeartbeat(Base):
     __tablename__ = "worker_heartbeats"
 
     id = Column(String(64), primary_key=True)
-    worker_id = Column(String(64), nullable=False, index=True)
+    worker_id = Column(String(64), nullable=False, unique=True, index=True)
     started_at = Column(DateTime(timezone=True), default=_now)
-    last_heartbeat = Column(Float, nullable=False)
-    last_cycle_started = Column(Float, nullable=True)
-    last_cycle_completed = Column(Float, nullable=True)
-    last_success = Column(Float, nullable=True)
+    last_heartbeat = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_cycle_started = Column(DateTime(timezone=True), nullable=True)
+    last_cycle_completed = Column(DateTime(timezone=True), nullable=True)
+    last_success = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=True)
     current_state = Column(String(32), default="starting")
     version = Column(String(32), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class WorkerLease(Base):
+    __tablename__ = "worker_leases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    worker_id = Column(String(64), nullable=False, index=True)
+    acquired_at = Column(DateTime(timezone=True), default=_now)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_renewed_at = Column(DateTime(timezone=True), default=_now)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    released_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class AuditEvent(Base):

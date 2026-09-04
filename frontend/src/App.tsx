@@ -23,6 +23,7 @@ function App() {
   const [sidebar, setSidebar] = useState(true)
   const [search, setSearch] = useState('')
   const [connection, setConnection] = useState<'demo' | 'online' | 'offline'>(isDemoMode ? 'demo' : 'offline')
+  const [accountBalance, setAccountBalance] = useState<number | null>(null)
 
   useEffect(() => {
     if (!API_BASE_URL) return
@@ -39,6 +40,34 @@ function App() {
       window.clearInterval(timer)
     }
   }, [])
+
+  // Fetch real account balance when online
+  useEffect(() => {
+    if (connection !== 'online') {
+      setAccountBalance(null)
+      return
+    }
+    let active = true
+    const fetchBalance = () => {
+      resolveSource().getAccount()
+        .then((account) => {
+          if (active && account.available && account.portfolio_value !== null) {
+            setAccountBalance(account.portfolio_value)
+          } else if (active) {
+            setAccountBalance(null)
+          }
+        })
+        .catch(() => {
+          if (active) setAccountBalance(null)
+        })
+    }
+    fetchBalance()
+    const timer = window.setInterval(fetchBalance, 30_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [connection])
 
   const filteredSymbols = demoSymbols.filter((item) => item.symbol.includes(search.toUpperCase()))
 
@@ -65,7 +94,7 @@ function App() {
         <div className="account-strip">
           <div>
             <span className="eyebrow">Portfolio equity</span>
-            <strong>$26,180.40</strong>
+            <strong>{accountBalance !== null ? `$${accountBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : connection === 'offline' ? 'OFFLINE' : connection === 'demo' ? 'DEMO' : '--'}</strong>
           </div>
           <button className="avatar" aria-label="Account menu">EP</button>
         </div>

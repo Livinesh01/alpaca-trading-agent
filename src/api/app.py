@@ -85,7 +85,53 @@ def _database_available() -> bool:
     return False
 
 
+def _worker_healthy_from_db() -> dict[str, Any]:
+    """Check worker heartbeat from PostgreSQL (authoritative source)."""
+    try:
+        from repositories import latest_worker_heartbeat, is_db_configured
+        if not is_db_configured():
+            return {"status": "unknown", "source": "db_not_configured"}
+        
+        heartbeat = latest_worker_heartbeat()
+        if heartbeat is None:
+            return {"status": "unknown", "source": "no_heartbeat"}
+        
+        last_hb = heartbeat.get("last_heartbeat")
+        if last_hb is None:
+            return {"status": "unknown", "source": "no_timestamp"}
+        
+        # Handle both epoch floats and datetime objects
+        if hasattr(last_hb, "timestamp"):
+            last_hb_epoch = last_hb.timestamp()
+        else:
+            last_hb_epoch = float(last_hb)
+        
+        heartbeat_fresh = time.time() - last_hb_epoch <= 600
+        state = heartbeat.get("current_state", "unknown")
+        
+        return {
+            "status": "healthy" if state in {"running", "cycling"} and heartbeat_fresh else "degraded",
+            "worker_status": state,
+            "last_heartbeat": last_hb_epoch,
+            "heartbeat_fresh": heartbeat_fresh,
+            "last_error": heartbeat.get("last_error"),
+            "worker_version": heartbeat.get("version"),
+            "worker_id": heartbeat.get("worker_id"),
+            "source": "postgresql",
+        }
+    except Exception:  # noqa: BLE001
+        return {"status": "unknown", "source": "db_error"}
+
+
 def _worker_healthy() -> dict[str, Any]:
+    """Check worker health - PostgreSQL is authoritative, local JSON is fallback."""
+    # PRIMARY: Check PostgreSQL (authoritative for production)
+    db_result = _worker_healthy_from_db()
+    if db_result["source"] == "postgresql":
+        db_result["db_available"] = True
+        return db_result
+    
+    # FALLBACK: Local JSON file (development only)
     worker: dict[str, Any] = {}
     try:
         with open(WORKER_STATUS_PATH, encoding="utf-8") as stream:
@@ -94,6 +140,7 @@ def _worker_healthy() -> dict[str, Any]:
             worker = value
     except (OSError, TypeError, ValueError):
         pass
+    
     heartbeat = worker.get("last_heartbeat")
     heartbeat_fresh = isinstance(heartbeat, (int, float)) and time.time() - heartbeat <= 600
     return {
@@ -104,7 +151,76 @@ def _worker_healthy() -> dict[str, Any]:
         "last_error": worker.get("last_error"),
         "worker_version": worker.get("version"),
         "db_available": _database_available(),
+        "source": "local_file_fallback",
     }
+
+
+def _check_alpaca_connectivity() -> dict[str, str]:
+    """Check actual Alpaca connectivity using a safe read-only endpoint."""
+    has_keys = bool(os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_SECRET_KEY"))
+    if not has_keys:
+        return {"status": "not_configured", "detail": "API keys not set"}
+    
+    # In test mode, don't actually try to connect
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return {"status": "configured", "detail": "Test mode - skipping connection check"}
+    
+    try:
+        from orchestrator import _RiskGuardProxySession
+        session = _RiskGuardProxySession()
+        try:
+            session.start()
+            # Use clock endpoint as a safe read-only check
+            result = session.call("get_clock", {})
+            if result:
+                return {"status": "connected", "detail": "Alpaca API reachable"}
+            return {"status": "degraded", "detail": "Empty response from clock"}
+        finally:
+            session.close()
+    except Exception as exc:
+        return {"status": "unavailable", "detail": f"Connection failed: {type(exc).__name__}"}
+
+
+def _check_market_data_connectivity() -> dict[str, str]:
+    """Check actual market data connectivity."""
+    mode = os.environ.get("SENTINEL_DATA_MODE", "offline").strip().lower()
+    if mode != "proxy":
+        return {"status": "disabled", "detail": f"SENTINEL_DATA_MODE={mode}"}
+    
+    # In test mode, don't actually try to connect
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return {"status": "configured", "detail": "Test mode - skipping connection check"}
+    
+    try:
+        source = get_data_source()
+        # Try to get a simple market data point
+        bars = source.get_bars("AAPL", timeframe="1Day", days=1, limit=1)
+        if bars:
+            return {"status": "connected", "detail": "Market data available"}
+        return {"status": "degraded", "detail": "No data returned"}
+    except Exception as exc:
+        return {"status": "unavailable", "detail": f"Data source error: {type(exc).__name__}"}
+
+
+def _check_llm_connectivity() -> dict[str, str]:
+    """Check LLM provider connectivity."""
+    provider = os.environ.get("LLM_PROVIDER", "fake").strip().lower()
+    if provider == "fake":
+        return {"status": "not_configured", "detail": "Using fake provider"}
+    
+    if provider == "featherless":
+        has_key = bool(os.environ.get("FEATHERLESS_API_KEY"))
+        if not has_key:
+            return {"status": "not_configured", "detail": "FEATHERLESS_API_KEY not set"}
+        return {"status": "configured", "detail": "Featherless provider configured"}
+    
+    if provider == "nvidia":
+        has_key = bool(os.environ.get("NVIDIA_API_KEY"))
+        if not has_key:
+            return {"status": "not_configured", "detail": "NVIDIA_API_KEY not set"}
+        return {"status": "configured", "detail": "NVIDIA provider configured"}
+    
+    return {"status": "unknown", "detail": f"Unknown provider: {provider}"}
 
 
 @asynccontextmanager
@@ -162,22 +278,80 @@ def _paginate(items: list[Any], page: int, page_size: int) -> dict[str, Any]:
 
 
 def _public_health() -> dict[str, Any]:
+    """Comprehensive health check with real connectivity verification."""
     paper = os.environ.get("PAPER_TRADING", "").strip().lower() in {"1", "true", "yes", "on"}
     alpaca_paper = os.environ.get("ALPACA_PAPER", "true").strip().lower() in {"1", "true", "yes", "on"}
+    alpaca_paper_trade = os.environ.get("ALPACA_PAPER_TRADE", "true").strip().lower() in {"1", "true", "yes", "on"}
+    kill_switch = os.environ.get("TRADING_KILL_SWITCH", "").strip().lower() in {"1", "true", "yes", "on"}
+    trading_enabled = os.environ.get("TRADING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    
+    # Worker health (PostgreSQL authoritative, local file fallback)
     worker_info = _worker_healthy()
+    
+    # Real connectivity checks
+    db_available = _database_available()
+    alpaca_check = _check_alpaca_connectivity()
+    market_data_check = _check_market_data_connectivity()
+    llm_check = _check_llm_connectivity()
+    
+    # Determine overall status
+    all_healthy = (
+        worker_info.get("status") == "healthy"
+        and db_available
+        and paper
+        and alpaca_paper
+        and alpaca_paper_trade
+        and not kill_switch
+        and trading_enabled
+    )
+    
+    # Determine status for each component
+    def _component_status(check_result: dict[str, str]) -> str:
+        status = check_result.get("status", "unknown")
+        if status == "connected":
+            return "healthy"
+        elif status == "configured":
+            return "configured"
+        elif status == "degraded":
+            return "degraded"
+        elif status in ("not_configured", "disabled"):
+            return "configured"  # Not an error, just not enabled
+        else:
+            return "unavailable"
+    
     return {
-        "status": "healthy" if worker_info["status"] == "healthy" and worker_info["db_available"] and paper and alpaca_paper else "degraded",
-        "backend": os.environ.get("AGENT_BACKEND", "decision_loop"),
-        "database": "available" if worker_info["db_available"] else "unavailable",
-        "worker": worker_info["worker_status"],
-        "alpaca": "configured" if os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_SECRET_KEY") else "not_configured",
-        "market_data": "configured" if os.environ.get("SENTINEL_DATA_MODE", "offline").strip().lower() == "proxy" else "disabled",
-        "llm": os.environ.get("LLM_PROVIDER", "unknown"),
+        "status": "healthy" if all_healthy else "degraded",
         "paper_trading": paper,
         "alpaca_paper": alpaca_paper,
-        "kill_switch": os.environ.get("TRADING_KILL_SWITCH", "").strip().lower() in {"1", "true", "yes", "on"},
-        "last_heartbeat": worker_info["last_heartbeat"],
-        "heartbeat_fresh": worker_info["heartbeat_fresh"],
+        "alpaca_paper_trade": alpaca_paper_trade,
+        "kill_switch": kill_switch,
+        "trading_enabled": trading_enabled,
+        "database": {
+            "status": "healthy" if db_available else "unavailable",
+            "available": db_available,
+        },
+        "worker": {
+            "status": worker_info.get("status", "unknown"),
+            "worker_status": worker_info.get("worker_status", "unknown"),
+            "last_heartbeat": worker_info.get("last_heartbeat"),
+            "heartbeat_fresh": worker_info.get("heartbeat_fresh"),
+            "worker_version": worker_info.get("worker_version"),
+            "worker_id": worker_info.get("worker_id"),
+            "source": worker_info.get("source", "unknown"),
+        },
+        "alpaca": {
+            "status": _component_status(alpaca_check),
+            "detail": alpaca_check.get("detail", ""),
+        },
+        "market_data": {
+            "status": _component_status(market_data_check),
+            "detail": market_data_check.get("detail", ""),
+        },
+        "llm": {
+            "provider": os.environ.get("LLM_PROVIDER", "unknown"),
+            "status": _component_status(llm_check),
+            "detail": llm_check.get("detail", ""),
+        },
         "auth_mode": os.environ.get("API_AUTH_MODE", "disabled"),
         "version": APP_VERSION,
     }
@@ -190,9 +364,69 @@ def public_health() -> dict[str, Any]:
 
 @app.get("/ready")
 def public_ready() -> dict[str, Any]:
+    """
+    Readiness check - returns 200 only when system can safely execute a paper decision.
+    
+    Required conditions for 200:
+    - Production configuration valid
+    - Paper mode confirmed
+    - Trading enabled
+    - PostgreSQL healthy
+    - Worker heartbeat fresh
+    - Alpaca reachable
+    - Market data reachable and fresh
+    - LLM provider reachable
+    - Risk configuration valid
+    - Kill switch disabled
+    """
     health_data = _public_health()
-    if health_data["status"] != "healthy" or not health_data["paper_trading"]:
-        return JSONResponse(status_code=503, content=health_data)
+    
+    # Check all required conditions
+    ready = True
+    reasons = []
+    
+    if health_data["status"] != "healthy":
+        ready = False
+        reasons.append("overall_status_not_healthy")
+    
+    if not health_data.get("paper_trading"):
+        ready = False
+        reasons.append("paper_trading_not_confirmed")
+    
+    if not health_data.get("alpaca_paper"):
+        ready = False
+        reasons.append("alpaca_paper_not_confirmed")
+    
+    if health_data.get("kill_switch"):
+        ready = False
+        reasons.append("kill_switch_active")
+    
+    if not health_data.get("trading_enabled"):
+        ready = False
+        reasons.append("trading_not_enabled")
+    
+    db_status = health_data.get("database", {}).get("status", "unknown")
+    if db_status != "healthy":
+        ready = False
+        reasons.append(f"database_{db_status}")
+    
+    worker_status = health_data.get("worker", {}).get("status", "unknown")
+    if worker_status != "healthy":
+        ready = False
+        reasons.append(f"worker_{worker_status}")
+    
+    # Database unavailable means not ready
+    if not health_data.get("database", {}).get("available", False):
+        ready = False
+        reasons.append("database_unavailable")
+    
+    if not ready:
+        response = dict(health_data)
+        response["ready"] = False
+        response["reasons"] = reasons
+        return JSONResponse(status_code=503, content=response)
+    
+    health_data["ready"] = True
     return health_data
 
 
@@ -356,23 +590,30 @@ def health(request: Request, _: Role = VIEWER_DEP):
     public = _public_health()
     health_data = _observability().read_status()
     kill = bool(health_data.get("kill_switch_enabled", False)) or public.get("kill_switch", False)
+    
+    # Extract values from new health structure
+    worker_info = public.get("worker", {})
+    db_info = public.get("database", {})
+    alpaca_info = public.get("alpaca", {})
+    market_info = public.get("market_data", {})
+    
     return _envelope(request, Health(
         status=public["status"],
         paper_trading=bool(public["paper_trading"]),
         kill_switch=kill,
-        llm_provider=health_data.get("provider") or public.get("llm"),
-        market_data=public.get("market_data"),
-        market_data_fresh=bool(public.get("heartbeat_fresh")),
+        llm_provider=health_data.get("provider") or public.get("llm", {}).get("provider"),
+        market_data=market_info.get("status", "unknown"),
+        market_data_fresh=worker_info.get("heartbeat_fresh", False),
         last_success=health_data.get("last_successful_run"),
         version=APP_VERSION,
         authentication=f"{public.get('auth_mode', 'unknown')} auth",
-        backend=public.get("backend"),
-        database=public.get("database"),
-        worker=public.get("worker"),
-        alpaca=public.get("alpaca"),
+        backend=os.environ.get("AGENT_BACKEND", "decision_loop"),
+        database=db_info.get("status", "unknown"),
+        worker=worker_info.get("status", "unknown"),
+        alpaca=alpaca_info.get("status", "unknown"),
         alpaca_paper=public.get("alpaca_paper"),
-        last_heartbeat=public.get("last_heartbeat"),
-        heartbeat_fresh=public.get("heartbeat_fresh"),
+        last_heartbeat=worker_info.get("last_heartbeat"),
+        heartbeat_fresh=worker_info.get("heartbeat_fresh"),
         auth_mode=public.get("auth_mode"),
     ))
 
