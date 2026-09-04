@@ -136,11 +136,12 @@ def _write_status(status: str, *, last_error: str | None = None, last_result: in
         )
 
     # FALLBACK: Local JSON for development only (not used in production)
-    try:
-        STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        STATUS_PATH.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-    except OSError:
-        pass
+    if not bootstrap.is_production():
+        try:
+            STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STATUS_PATH.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

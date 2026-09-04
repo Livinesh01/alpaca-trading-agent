@@ -542,12 +542,36 @@ async def sse_stream(request: Request):
                     yield 'data: {"type":"shutdown"}\n\n'
                     break
                 try:
-                    events, new_offset = _read_events(obs.events_path, last_offset)
-                    if events:
-                        last_offset = new_offset
-                        for event in events:
-                            safe = _redact_sse(event)
-                            yield f'data: {json.dumps(safe, separators=(",", ":"))}\n\n'
+                    from api.services.history_source import use_postgres_history
+
+                    if use_postgres_history():
+                        from repositories import list_agent_events
+
+                        page = list_agent_events(page=1, page_size=50)
+                        events = [
+                            {
+                                "timestamp": e.get("timestamp"),
+                                "event_type": e.get("event_type"),
+                                "severity": e.get("severity"),
+                                "run_id": e.get("run_id"),
+                                "symbol": e.get("symbol"),
+                                **(e.get("fields") or {}),
+                            }
+                            for e in page.get("items", [])
+                            if float(e.get("timestamp") or 0) > last_offset
+                        ]
+                        if events:
+                            last_offset = max(float(e.get("timestamp") or 0) for e in events)
+                            for event in events:
+                                safe = _redact_sse(event)
+                                yield f'data: {json.dumps(safe, separators=(",", ":"))}\n\n'
+                    else:
+                        events, new_offset = _read_events(obs.events_path, last_offset)
+                        if events:
+                            last_offset = new_offset
+                            for event in events:
+                                safe = _redact_sse(event)
+                                yield f'data: {json.dumps(safe, separators=(",", ":"))}\n\n'
                 except Exception:  # noqa: BLE001, S110
                     pass
                 # Sleep in small slices so client disconnects are honored promptly
