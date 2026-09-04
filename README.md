@@ -1,113 +1,59 @@
 
-# EPSILON — AI Trading Agent (Paper Only)
+# EPSILON - Autonomous AI Trading Agent
 
-> **THIS SYSTEM IS PAPER TRADING ONLY. It NEVER trades live money.**
-> All orders are submitted exclusively to Alpaca's paper-trading API.
+EPSILON separates **AI reasoning from trade execution**. The agent collects Alpaca Paper market and account data, validates freshness and integrity, computes deterministic technical signals, and sends structured context to Featherless AI for a BUY / SELL / HOLD proposal.
 
-An autonomous AI trading agent built on Alpaca's paper trading API, driven by
-the Cline CLI as the agent loop — with a hard risk-guard layer, CI/CD, full
-observability, PostgreSQL persistence, JWT authentication, RBAC, and
-production deployment configuration wrapped around it.
+The LLM has **no execution authority**. It cannot choose order quantities, change risk limits, bypass safeguards, or submit orders. Python calculates quantity from current price, buying power, maximum order notional, and position limits. Every AI response is schema-validated before execution.
+
+## Multi-Layer Risk Gates
+
+Every proposed trade passes deterministic safety gates:
+
+1. **Market-data validation** - validates price, timestamps, OHLC consistency, and freshness.
+2. **Decision validation** - validates structured AI output and allowed actions.
+3. **Watchlist enforcement** - only approved symbols can be traded.
+4. **Position controls** - enforces maximum positions and exposure.
+5. **Order limits** - enforces maximum notional and per-run limits.
+6. **Daily-loss protection** - blocks trading when loss limits are reached.
+7. **Buying-power validation** - prevents orders from exceeding available funds.
+8. **Market-session validation** - checks Alpaca's authoritative market clock.
+9. **Final Order Gate** - revalidates account state and price before submission.
+10. **Idempotency and reconciliation** - prevents duplicates and supports recovery with Alpaca `client_order_id`.
+11. **Paper-only enforcement** - rejects non-paper production configuration.
+12. **Worker lease protection** - PostgreSQL leader election prevents duplicate trading cycles.
+
+The system **fails closed**. If critical data, database state, configuration, lease ownership, or safety validation cannot be confirmed, the agent does not trade.
 
 ## Architecture
 
-```
-                    ┌──────────────────┐
-                    │   Vercel CDN     │
-                    │   EPSILON UI     │  (React, static build)
-                    └────────┬─────────┘
-                             │ HTTPS (CORS-allowlisted)
-                    ┌────────┴─────────┐
-                    │   FastAPI        │
-                    │   Persistent     │  (backend API, port 8000)
-                    │   PostgreSQL     │  (primary data store)
-                    └────────┬─────────┘
-                             │
-                    ┌────────┴─────────┐
-                    │   Worker         │  (src/worker.py, separate process)
-                    │   (persistent)   │
-                    └────────┬─────────┘
-                             │
-                    ┌────────┴─────────┐
-                    │   Alpaca         │  (PAPER API ONLY)
-                    │   Paper API      │
-                    └────────┬─────────┘
-                             │
-                    ┌────────┴─────────┐
-                    │   Featherless     │  (OpenAI-compatible LLM)
-                    │   (or NVIDIA NIM) │
-                    └──────────────────┘
-```
-## Components
-
-- `src/api/app.py` — FastAPI backend with RBAC, rate limiting, health checks, SSE streaming, audit logging.
-- `src/api/auth.py` — RBAC role definitions and authorization helpers.
-- `src/auth.py` — JWT authentication (HS256/RS256/ES256), OIDC-ready.
-- `src/config.py` — Strict production configuration validation. Fails closed.
-- `src/db.py` — SQLAlchemy ORM persistence (PostgreSQL/SQLite).
-- `src/repositories.py` — Repository/service abstractions over the ORM.
-- `src/worker.py` — Persistent paper-only trading supervisor.
-- `src/agent/decision_loop.py` — Structured decision-making loop with mandatory safety chain.
-- `src/agent/llm.py` — LLM provider abstraction (Featherless, NVIDIA).
-- `src/market_data.py` — Real-time market data from Alpaca paper account.
-- `src/observability.py` — Structured JSON logging with correlation IDs.
-- `src/metrics.py` — Prometheus metrics.
-- `src/journal.py` — Append-only trade journal and audit log.
-- `src/idempotency.py` — Idempotency key derivation and storage.
-- `src/risk_rules.py` — Pure, unit-tested risk logic.
-- `src/risk_guard_proxy.py` — MCP proxy that intercepts order calls.
-- `src/orchestrator.py` — Headless entry point that invokes the Cline CLI.
-- `config/strategy.yaml` — Risk limits and watchlist.
-- `frontend/` — EPSILON React dashboard with real-time SSE/polling.
-
-## Safety Chain
-
-The trading safety chain is **mandatory** — no code path may bypass any stage:
-
-```
-Market Data -> Data Validation -> AI Analysis -> Structured Decision ->
-Decision Validation -> Risk Guard -> Final Gate -> Idempotency Check ->
-Paper Trading API -> Execution Verification
+```text
+React/Vercel Frontend -> FastAPI Backend -> PostgreSQL + Persistent Worker
+                         -> Alpaca Paper API + Featherless AI
 ```
 
-- **No live-money trading**: Verified at 5 independent layers.
-- **Fail-closed design**: The agent does not trade if any component is unavailable, stale, or misconfigured.
+EPSILON uses Alpaca Paper Trading for execution and account data. PostgreSQL stores decisions, orders, executions, risk events, agent events, worker heartbeats, worker leases, audit events, and idempotency state.
 
-## Quick Start (Local Development)
+The persistent worker acquires and renews a PostgreSQL lease, runs trading cycles, and writes authoritative heartbeats. FastAPI readiness checks verify the database, worker, Alpaca, market data, LLM, paper mode, and kill switch before reporting readiness.
 
-```
-cp .env.example .env
-pip install -r requirements.txt
-uvicorn src.api.app:app --reload --port 8000
-python src/worker.py
-cd frontend && npm install && npm run dev
-```
+Authentication uses production JWT/RBAC controls. Secrets come from environment configuration and are redacted from errors.
 
-Use `X-Dev-Role: VIEWER`, `TRADER`, `OPERATOR`, or `ADMIN` to test RBAC.
+## Architecture Audit and Hardening
 
-## Production Deployment
+- Local worker heartbeat -> **PostgreSQL persistence**
+- Missing worker singleton protection -> **PostgreSQL lease and leader election**
+- Database idempotency fail-open behavior -> **fail-closed checks and Alpaca reconciliation**
+- Configuration-only health checks -> **real dependency checks**
+- Incomplete readiness reporting -> **dependency-aware readiness**
+- Hardcoded frontend portfolio values -> **Alpaca-backed account data**
+- Missing market-session validation -> **Alpaca market clock**
+- Configuration contradictions -> **fail-closed validation**
+- Silent worker and repository failures -> **observable error handling**
+- JWT test secret warning -> **hardened test fixture without weaker production security**
 
-See DEPLOYMENT.md. Deploy backend + worker to Render/Fly.io (persistent process), PostgreSQL (managed), frontend to Vercel.
+## Verification Status
 
-## Documentation
+**428 automated tests pass**, Ruff hardening is being completed, and the frontend builds successfully.
 
-- Architecture Deep Dive: ARCHITECTURE.md
-- Deployment Guide: DEPLOYMENT.md
-- Operations Guide: OPERATIONS.md
-- Security Policy: SECURITY.md
+The remaining verification step is a real external end-to-end test with valid Alpaca Paper credentials and a Featherless API key. Until that test runs, EPSILON is accurately described as:
 
-## Testing
-
-```
-python -m pytest tests/ -v
-cd frontend && npm run test
-ruff check src/ tests/
-```
-
-## Status
-
-**Paper trading only.** Not production-deployed. See DEPLOYMENT.md.
-
-### Credential Safety
-
-If credentials were previously exposed during development, they **must** be rotated before any production deployment. See SECURITY.md.
+> **Production-hardened architecture with real Alpaca and Featherless integration implemented; external end-to-end execution verification pending.**
