@@ -105,6 +105,12 @@ def log_audit_event(
     return event_id
 
 
+def _use_postgres() -> bool:
+    from config import is_production_env
+
+    return is_production_env()
+
+
 def read_audit_log(
     page: int = 1,
     page_size: int = 50,
@@ -112,9 +118,31 @@ def read_audit_log(
     actor_id: str | None = None,
     outcome: str | None = None,
 ) -> dict[str, Any]:
-    """Read audit log entries from local JSONL with optional filters."""
+    """Read audit entries — PostgreSQL in production, local JSONL in development."""
     page = max(int(page), 1)
     page_size = max(min(int(page_size), 200), 1)
+
+    if _use_postgres():
+        # Production audit reads are authoritative PostgreSQL queries; a DB
+        # failure surfaces explicitly instead of silently serving local files.
+        try:
+            from repositories import list_audit_events
+
+            return list_audit_events(
+                page=page,
+                page_size=page_size,
+                event_type=event_type,
+                actor_id=actor_id,
+                outcome=outcome,
+            )
+        except Exception as exc:  # noqa: BLE001 — explicit unavailability
+            return {
+                "items": [],
+                "available": False,
+                "reason": f"audit history unavailable (PostgreSQL): {type(exc).__name__}",
+                "pagination": {"page": page, "page_size": page_size, "total": 0},
+            }
+
     records: list[dict[str, Any]] = []
 
     audit_dir = Path(DEFAULT_AUDIT_DIR)

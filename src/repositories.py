@@ -13,6 +13,7 @@ requires broker-side idempotency reconciliation via Alpaca client_order_id.
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -31,6 +32,9 @@ from db import (
     db_session,
     get_session,
 )
+from errors import ExecutionError
+
+logger = logging.getLogger(__name__)
 
 
 def _now_epoch() -> float:
@@ -165,7 +169,11 @@ def acquire_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> 
             )
             session.add(lease)
             return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - Fail closed on DB errors
+        logger.error(
+            "Worker lease acquisition failed: %s",
+            type(exc).__name__,
+        )
         return False  # Fail closed - don't run if lease can't be acquired
 
 
@@ -192,7 +200,11 @@ def renew_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> bo
             lease.expires_at = now + __import__("datetime").timedelta(seconds=lease_expiry_seconds)
             lease.last_renewed_at = now
             return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - Fail closed on DB errors
+        logger.error(
+            "Worker lease renewal failed: %s",
+            type(exc).__name__,
+        )
         return False
 
 
@@ -215,7 +227,11 @@ def release_worker_lease(*, worker_id: str) -> bool:
                 lease.is_active = False
                 lease.released_at = _now_datetime()
             return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - Best-effort release, never crash caller
+        logger.error(
+            "Worker lease release failed: %s",
+            type(exc).__name__,
+        )
         return False
 
 
@@ -244,7 +260,11 @@ def get_active_lease() -> dict[str, Any] | None:
                 "expires_at": _epoch_or_none(lease.expires_at),
                 "last_renewed_at": _epoch_or_none(lease.last_renewed_at),
             }
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - Best-effort read, return None on failure
+        logger.error(
+            "Failed to get active worker lease: %s",
+            type(exc).__name__,
+        )
         return None
 
 
@@ -520,7 +540,11 @@ def check_idempotency_status(key: str) -> dict[str, Any] | None:
                 "status": record.status,
                 "created_at": _epoch_or_none(record.created_at),
             }
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - Best-effort read, return None on failure
+        logger.error(
+            "Failed to check idempotency status: %s",
+            type(exc).__name__,
+        )
         return None
 
 
@@ -534,8 +558,380 @@ def update_idempotency_execution(key: str, execution_id: str) -> bool:
             if record is not None:
                 record.execution_id = execution_id
             return True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - Best-effort update, never crash caller
+        logger.error(
+            "Failed to update idempotency execution: %s",
+            type(exc).__name__,
+        )
         return False
+
+
+# ---------------------------------------------------------------------------
+# Production read paths (PostgreSQL-authoritative history)
+# ---------------------------------------------------------------------------
+
+
+def _parse_iso_utc(value: str) -> Any:
+    """Parse an ISO-8601 string into a timezone-aware UTC datetime."""
+    from datetime import datetime
+
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _decision_to_dict(row: Decision) -> dict[str, Any]:
+    return {
+        "decision_id": row.id,
+        "run_id": row.run_id,
+        "timestamp": row.created_at.isoformat() if row.created_at else None,
+        "symbol": row.symbol,
+        "action": row.action,
+        "confidence": row.confidence,
+        "thesis": row.thesis,
+        "entry_reason": row.entry_reason,
+        "position_size": row.position_size,
+        "decision_price": row.decision_price,
+        "model": row.model,
+        "provider": row.provider,
+    }
+
+
+def _execution_to_dict(row: Execution) -> dict[str, Any]:
+    return {
+        "execution_id": row.id,
+        "order_id": row.order_id,
+        "symbol": row.symbol,
+        "side": row.side,
+        "qty": row.qty,
+        "client_order_id": row.client_order_id,
+        "status": row.status,
+        "timestamp": row.executed_at.isoformat() if row.executed_at else None,
+        "decision_id": row.decision_id,
+        "run_id": row.run_id,
+    }
+
+
+def _risk_event_to_dict(row: RiskEvent) -> dict[str, Any]:
+    return {
+        "event_id": row.id,
+        "symbol": row.symbol,
+        "side": row.side,
+        "qty": row.qty,
+        "allowed": row.allowed,
+        "reason_code": row.reason_code,
+        "reason": row.reason,
+        "decision_id": row.decision_id,
+        "run_id": row.run_id,
+        "timestamp": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _agent_event_to_dict(row: AgentEvent) -> dict[str, Any]:
+    return {
+        "event_id": row.id,
+        "event_type": row.event_type,
+        "severity": row.severity,
+        "run_id": row.run_id,
+        "decision_id": row.decision_id,
+        "execution_id": row.execution_id,
+        "symbol": row.symbol,
+        "timestamp": row.timestamp,
+        "fields": dict(row.fields or {}),
+    }
+
+
+def _audit_event_to_dict(row: AuditEvent) -> dict[str, Any]:
+    return {
+        "event_id": row.id,
+        "event_type": row.event_type,
+        "actor_id": row.actor_id,
+        "actor_role": row.actor_role,
+        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+        "ip_address": row.ip_address,
+        "user_agent": row.user_agent,
+        "resource": row.resource,
+        "outcome": row.outcome,
+        "fields": dict(row.details or {}),
+    }
+
+
+def list_decisions(
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    symbol: str | None = None,
+    action: str | None = None,
+    run_id: str | None = None,
+    decision_id: str | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """Query persisted decisions (newest first). Raises when PostgreSQL fails."""
+    from sqlalchemy import func, select
+
+    page = max(int(page), 1)
+    page_size = max(min(int(page_size), 200), 1)
+
+    def _apply(stmt: Any) -> Any:
+        if symbol:
+            stmt = stmt.where(Decision.symbol == str(symbol).upper())
+        if action:
+            stmt = stmt.where(Decision.action == str(action).upper())
+        if run_id:
+            stmt = stmt.where(Decision.run_id == str(run_id))
+        if decision_id:
+            stmt = stmt.where(Decision.id == str(decision_id))
+        if confidence_min is not None:
+            stmt = stmt.where(Decision.confidence >= float(confidence_min))
+        if confidence_max is not None:
+            stmt = stmt.where(Decision.confidence <= float(confidence_max))
+        if date_from:
+            stmt = stmt.where(Decision.created_at >= _parse_iso_utc(date_from))
+        if date_to:
+            stmt = stmt.where(Decision.created_at <= _parse_iso_utc(date_to))
+        return stmt
+
+    try:
+        with get_session() as session:
+            total = int(session.scalar(_apply(select(func.count()).select_from(Decision))) or 0)
+            stmt = _apply(select(Decision)).order_by(Decision.created_at.desc(), Decision.id.desc())
+            rows = session.scalars(stmt.limit(page_size).offset((page - 1) * page_size)).all()
+            return {
+                "items": [_decision_to_dict(row) for row in rows],
+                "available": True,
+                "reason": None,
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+            }
+    except Exception as exc:  # noqa: BLE001 — caller surfaces explicit unavailability
+        raise ExecutionError(f"decision history unavailable: {type(exc).__name__}") from exc
+
+
+def get_decision(decision_id: str) -> dict[str, Any] | None:
+    """Fetch one persisted decision, or None when absent. Raises on DB failure."""
+    try:
+        with get_session() as session:
+            row = session.get(Decision, str(decision_id))
+            return _decision_to_dict(row) if row is not None else None
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"decision lookup unavailable: {type(exc).__name__}") from exc
+
+
+def list_executions(*, page: int = 1, page_size: int = 50) -> dict[str, Any]:
+    """Query persisted executions (newest first). Raises when PostgreSQL fails."""
+    from sqlalchemy import func, select
+
+    page = max(int(page), 1)
+    page_size = max(min(int(page_size), 200), 1)
+    try:
+        with get_session() as session:
+            total = int(session.scalar(select(func.count()).select_from(Execution)) or 0)
+            stmt = select(Execution).order_by(Execution.executed_at.desc(), Execution.id.desc())
+            rows = session.scalars(stmt.limit(page_size).offset((page - 1) * page_size)).all()
+            return {
+                "items": [_execution_to_dict(row) for row in rows],
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+            }
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"execution history unavailable: {type(exc).__name__}") from exc
+
+
+def get_execution_for_decision(decision_id: str) -> dict[str, Any] | None:
+    """Fetch the newest execution recorded for a decision, or None. Raises on DB failure."""
+    from sqlalchemy import select
+
+    try:
+        with get_session() as session:
+            stmt = (
+                select(Execution)
+                .where(Execution.decision_id == str(decision_id))
+                .order_by(Execution.executed_at.desc(), Execution.id.desc())
+            )
+            row = session.scalars(stmt).first()
+            return _execution_to_dict(row) if row is not None else None
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"execution lookup unavailable: {type(exc).__name__}") from exc
+
+
+def list_risk_events(*, page: int = 1, page_size: int = 50, run_id: str | None = None) -> dict[str, Any]:
+    """Query persisted risk/final-gate verdicts (newest first)."""
+    from sqlalchemy import func, select
+
+    page = max(int(page), 1)
+    page_size = max(min(int(page_size), 200), 1)
+    try:
+        with get_session() as session:
+            count_stmt = select(func.count()).select_from(RiskEvent)
+            stmt = select(RiskEvent)
+            if run_id:
+                count_stmt = count_stmt.where(RiskEvent.run_id == str(run_id))
+                stmt = stmt.where(RiskEvent.run_id == str(run_id))
+            total = int(session.scalar(count_stmt) or 0)
+            rows = session.scalars(
+                stmt.order_by(RiskEvent.created_at.desc(), RiskEvent.id.desc()).limit(page_size).offset((page - 1) * page_size)
+            ).all()
+            return {
+                "items": [_risk_event_to_dict(row) for row in rows],
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+            }
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"risk history unavailable: {type(exc).__name__}") from exc
+
+
+def get_risk_event_for_decision(decision_id: str) -> dict[str, Any] | None:
+    """Fetch the newest risk verdict recorded for a decision, or None. Raises on DB failure."""
+    from sqlalchemy import select
+
+    try:
+        with get_session() as session:
+            stmt = (
+                select(RiskEvent)
+                .where(RiskEvent.decision_id == str(decision_id))
+                .order_by(RiskEvent.created_at.desc(), RiskEvent.id.desc())
+            )
+            row = session.scalars(stmt).first()
+            return _risk_event_to_dict(row) if row is not None else None
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"risk lookup unavailable: {type(exc).__name__}") from exc
+
+
+def count_risk_events(*, allowed: bool | None = None) -> int:
+    """Count risk verdicts (all, or only allowed/rejected). Raises on DB failure."""
+    from sqlalchemy import func, select
+
+    try:
+        with get_session() as session:
+            stmt = select(func.count()).select_from(RiskEvent)
+            if allowed is not None:
+                stmt = stmt.where(RiskEvent.allowed == bool(allowed))
+            return int(session.scalar(stmt) or 0)
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"risk count unavailable: {type(exc).__name__}") from exc
+
+
+def list_agent_events(
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    event_type: str | None = None,
+    run_id: str | None = None,
+    decision_id: str | None = None,
+    execution_id: str | None = None,
+    symbol: str | None = None,
+    time_from: str | None = None,
+    time_to: str | None = None,
+) -> dict[str, Any]:
+    """Query persisted agent events (newest first). Raises when PostgreSQL fails."""
+    from sqlalchemy import func, select
+
+    page = max(int(page), 1)
+    page_size = max(min(int(page_size), 200), 1)
+
+    def _apply(stmt: Any) -> Any:
+        if event_type:
+            stmt = stmt.where(AgentEvent.event_type == str(event_type))
+        if run_id:
+            stmt = stmt.where(AgentEvent.run_id == str(run_id))
+        if decision_id:
+            stmt = stmt.where(AgentEvent.decision_id == str(decision_id))
+        if execution_id:
+            stmt = stmt.where(AgentEvent.execution_id == str(execution_id))
+        if symbol:
+            stmt = stmt.where(AgentEvent.symbol == str(symbol).upper())
+        if time_from:
+            stmt = stmt.where(AgentEvent.timestamp >= float(_parse_iso_utc(time_from).timestamp()))
+        if time_to:
+            stmt = stmt.where(AgentEvent.timestamp <= float(_parse_iso_utc(time_to).timestamp()))
+        return stmt
+
+    try:
+        with get_session() as session:
+            total = int(session.scalar(_apply(select(func.count()).select_from(AgentEvent))) or 0)
+            stmt = _apply(select(AgentEvent)).order_by(AgentEvent.timestamp.desc(), AgentEvent.id.desc())
+            rows = session.scalars(stmt.limit(page_size).offset((page - 1) * page_size)).all()
+            return {
+                "items": [_agent_event_to_dict(row) for row in rows],
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+            }
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"activity history unavailable: {type(exc).__name__}") from exc
+
+
+def count_agent_events(event_type: str | None = None) -> int:
+    """Count agent events, optionally filtered by event_type. Raises on DB failure."""
+    from sqlalchemy import func, select
+
+    try:
+        with get_session() as session:
+            stmt = select(func.count()).select_from(AgentEvent)
+            if event_type:
+                stmt = stmt.where(AgentEvent.event_type == str(event_type))
+            return int(session.scalar(stmt) or 0)
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"event count unavailable: {type(exc).__name__}") from exc
+
+
+def list_audit_events(
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    event_type: str | None = None,
+    actor_id: str | None = None,
+    outcome: str | None = None,
+) -> dict[str, Any]:
+    """Query persisted audit events (newest first). Raises when PostgreSQL fails."""
+    from sqlalchemy import func, select
+
+    page = max(int(page), 1)
+    page_size = max(min(int(page_size), 200), 1)
+
+    def _apply(stmt: Any) -> Any:
+        if event_type:
+            stmt = stmt.where(AuditEvent.event_type == str(event_type))
+        if actor_id:
+            stmt = stmt.where(AuditEvent.actor_id == str(actor_id))
+        if outcome:
+            stmt = stmt.where(AuditEvent.outcome == str(outcome))
+        return stmt
+
+    try:
+        with get_session() as session:
+            total = int(session.scalar(_apply(select(func.count()).select_from(AuditEvent))) or 0)
+            stmt = _apply(select(AuditEvent)).order_by(AuditEvent.timestamp.desc(), AuditEvent.id.desc())
+            rows = session.scalars(stmt.limit(page_size).offset((page - 1) * page_size)).all()
+            return {
+                "items": [_audit_event_to_dict(row) for row in rows],
+                "available": True,
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+            }
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"audit history unavailable: {type(exc).__name__}") from exc
+
+
+def list_system_health() -> list[dict[str, Any]]:
+    """Read system-health component rows. Raises when PostgreSQL fails."""
+    from sqlalchemy import select
+
+    try:
+        with get_session() as session:
+            rows = session.scalars(select(SystemHealth).order_by(SystemHealth.component)).all()
+            return [
+                {
+                    "component": row.component,
+                    "status": row.status,
+                    "details": dict(row.details or {}),
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                }
+                for row in rows
+            ]
+    except Exception as exc:  # noqa: BLE001
+        raise ExecutionError(f"system health unavailable: {type(exc).__name__}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -566,9 +962,20 @@ __all__ = [
     "acquire_worker_lease",
     "check_idempotency_status",
     "claim_idempotency_guard",
+    "count_agent_events",
+    "count_risk_events",
     "get_active_lease",
+    "get_decision",
+    "get_execution_for_decision",
+    "get_risk_event_for_decision",
     "is_db_configured",
     "latest_worker_heartbeat",
+    "list_agent_events",
+    "list_audit_events",
+    "list_decisions",
+    "list_executions",
+    "list_risk_events",
+    "list_system_health",
     "record_agent_event",
     "record_audit_event",
     "record_decision",

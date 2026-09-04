@@ -6,6 +6,7 @@ and pagination keep large histories from being dumped into the browser.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from api.services.records import read_records
@@ -22,6 +23,46 @@ def _severity(event: dict[str, Any]) -> str:
     if event_type in {"run_completed", "order_filled", "execution_recorded"}:
         return "info"
     return "info"
+
+
+def _pg_activity(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Shape PostgreSQL agent_events into the activity-feed contract."""
+    from api.services.utils import age_seconds
+
+    items = []
+    for event in events:
+        fields = dict(event.get("fields") or {})
+        timestamp = event.get("timestamp")
+        iso_ts = (
+            datetime.fromtimestamp(float(timestamp), tz=timezone.utc).isoformat()
+            if timestamp is not None
+            else None
+        )
+        items.append(
+            {
+                "timestamp": iso_ts,
+                "age_seconds": age_seconds(iso_ts),
+                "event_type": event.get("event_type"),
+                "severity": _severity(event),
+                "run_id": event.get("run_id"),
+                "decision_id": event.get("decision_id"),
+                "execution_id": event.get("execution_id"),
+                "outcome_id": fields.pop("outcome_id", None),
+                "symbol": event.get("symbol"),
+                "fields": fields,
+            }
+        )
+    return items
+
+
+def _pg_unavailable(exc: Exception, page: int, page_size: int) -> dict[str, Any]:
+    from api.services.history_source import unavailable
+
+    return unavailable(
+        f"activity unavailable (PostgreSQL): {type(exc).__name__}",
+        page=page,
+        page_size=page_size,
+    )
 
 
 def _matches(event: dict[str, Any], **filters: Any) -> bool:
@@ -54,6 +95,22 @@ def list_activity(
     page_size: int = 50,
     **filters: Any,
 ) -> dict[str, Any]:
+    from api.services.history_source import use_postgres_history
+
+    if use_postgres_history():
+        # C4: production serves the activity feed from PostgreSQL agent_events.
+        try:
+            from repositories import list_agent_events
+
+            result = list_agent_events(page=page, page_size=page_size, **filters)
+        except Exception as exc:  # noqa: BLE001 — explicit unavailability
+            return _pg_unavailable(exc, page, page_size)
+        return {
+            "items": _pg_activity(result["items"]),
+            "available": True,
+            "reason": None,
+            "pagination": result["pagination"],
+        }
     records = read_records(observability.events_path)
     records.sort(key=lambda item: float(item.get("timestamp") or 0.0), reverse=True)
     filtered = [event for event in records if _matches(event, **filters)]

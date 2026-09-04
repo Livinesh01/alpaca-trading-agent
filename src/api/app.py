@@ -88,7 +88,7 @@ def _database_available() -> bool:
 def _worker_healthy_from_db() -> dict[str, Any]:
     """Check worker heartbeat from PostgreSQL (authoritative source)."""
     try:
-        from repositories import latest_worker_heartbeat, is_db_configured
+        from repositories import is_db_configured, latest_worker_heartbeat
         if not is_db_configured():
             return {"status": "unknown", "source": "db_not_configured"}
         
@@ -131,6 +131,22 @@ def _worker_healthy() -> dict[str, Any]:
         db_result["db_available"] = True
         return db_result
     
+    # C4: production must NOT fall back to a worker-local JSON file - the API
+    # and worker do not share a filesystem. A missing DB heartbeat is reported
+    # as degraded/unknown, never disguised by a stale local file.
+    from api.services.history_source import is_production
+
+    if is_production():
+        return {
+            "status": "degraded",
+            "worker_status": db_result.get("worker_status", "unknown"),
+            "last_heartbeat": db_result.get("last_heartbeat"),
+            "heartbeat_fresh": False,
+            "last_error": db_result.get("last_error", "no PostgreSQL heartbeat"),
+            "worker_version": db_result.get("worker_version"),
+            "db_available": _database_available(),\n            "source": "postgresql_unavailable",
+        }
+
     # FALLBACK: Local JSON file (development only)
     worker: dict[str, Any] = {}
     try:
@@ -177,7 +193,11 @@ def _check_alpaca_connectivity() -> dict[str, str]:
             return {"status": "degraded", "detail": "Empty response from clock"}
         finally:
             session.close()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - Health check must never crash /health or /ready
+        logger.warning(
+            "Alpaca connectivity check failed: %s",
+            type(exc).__name__,
+        )
         return {"status": "unavailable", "detail": f"Connection failed: {type(exc).__name__}"}
 
 
@@ -198,7 +218,11 @@ def _check_market_data_connectivity() -> dict[str, str]:
         if bars:
             return {"status": "connected", "detail": "Market data available"}
         return {"status": "degraded", "detail": "No data returned"}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - Health check must never crash /health or /ready
+        logger.warning(
+            "Market data connectivity check failed: %s",
+            type(exc).__name__,
+        )
         return {"status": "unavailable", "detail": f"Data source error: {type(exc).__name__}"}
 
 
@@ -452,7 +476,28 @@ async def sse_stream(request: Request):
     ping_interval = 30
 
     if "text/event-stream" not in accept:
-        events = _read_events(obs.events_path, 0)[0][-50:]
+        from api.services.history_source import use_postgres_history
+
+        if use_postgres_history():
+            # C4: production real-time snapshot reads PostgreSQL agent_events.
+            try:
+                from repositories import list_agent_events
+
+                events = [
+                    {
+                        "timestamp": e.get("timestamp"),
+                        "event_type": e.get("event_type"),
+                        "severity": e.get("severity"),
+                        "run_id": e.get("run_id"),
+                        "symbol": e.get("symbol"),
+                        **e.get("fields", {}),
+                    }
+                    for e in list_agent_events(page=1, page_size=50).get("items", [])
+                ]
+            except Exception:  # noqa: BLE001 — snapshot is best-effort
+                events = []
+        else:
+            events = _read_events(obs.events_path, 0)[0][-50:]
         return JSONResponse(
             {
                 "data": [_redact_sse(event) for event in events],
@@ -634,7 +679,19 @@ def positions(request: Request, _: Role = VIEWER_DEP, page: int = 1, page_size: 
 
 @app.get("/api/v1/orders")
 def orders(request: Request, _: Role = VIEWER_DEP, page: int = 1, page_size: int = 50):
-    payload = order_service.get_orders(_data_source(), _memory().decisions())
+    from api.services.history_source import use_postgres_history
+
+    if use_postgres_history():
+        # C4: production correlates orders with PostgreSQL decisions.
+        try:
+            from repositories import list_decisions
+
+            recent = list_decisions(page=1, page_size=200).get("items", [])
+        except Exception:  # noqa: BLE001 — correlation is informational only
+            recent = []
+    else:
+        recent = _memory().decisions()
+    payload = order_service.get_orders(_data_source(), recent)
     paged = _paginate(payload.pop("items", []), page, page_size)
     payload.update(paged)
     return _envelope(request, payload)
@@ -750,6 +807,29 @@ def decision_replay(decision_id: str, request: Request, _: Role = VIEWER_DEP):
 
 @app.get("/api/v1/executions")
 def executions(request: Request, _: Role = VIEWER_DEP, page: int = 1, page_size: int = 50):
+    from api.services.history_source import use_postgres_history
+
+    if use_postgres_history():
+        # C4: production execution history is PostgreSQL-authoritative.
+        try:
+            from repositories import list_executions
+
+            result = list_executions(page=page, page_size=page_size)
+        except Exception as exc:  # noqa: BLE001 — explicit unavailability
+            from api.services.history_source import unavailable
+
+            return _envelope(
+                request,
+                {
+                    "informational": True,
+                    **unavailable(
+                        f"execution history unavailable (PostgreSQL): {type(exc).__name__}",
+                        page=page,
+                        page_size=page_size,
+                    ),
+                },
+            )
+        return _envelope(request, {"informational": True, **result})
     items = _memory().executions()
     return _envelope(request, {"informational": True, **_paginate(items, page, page_size)})
 
@@ -761,8 +841,9 @@ def risk(request: Request, _: Role = VIEWER_DEP):
 
 @app.get("/api/v1/risk/kill-switch", response_model=APIEnvelope[KillSwitch])
 def kill_switch(request: Request, _: Role = VIEWER_DEP):
-    state = _observability().read_status()
-    return _envelope(request, KillSwitch(enabled=bool(state.get("kill_switch_enabled", False))))
+    # The kill switch is env-authoritative; local health files never decide it.
+    enabled = os.environ.get("TRADING_KILL_SWITCH", "").strip().lower() in {"1", "true", "yes", "on"}
+    return _envelope(request, KillSwitch(enabled=enabled))
 
 
 @app.get("/api/v1/activity")
@@ -865,6 +946,23 @@ def evaluation_detail(evaluation_id: str, request: Request, _: Role = VIEWER_DEP
 @app.get("/api/v1/system", response_model=APIEnvelope[System])
 def system(request: Request, _: Role = VIEWER_DEP):
     state = _observability().read_status()
+    from api.services.history_source import use_postgres_history
+
+    if use_postgres_history():
+        # C4: production merges PostgreSQL system-health components into the
+        # observability snapshot so the API reflects worker-reported state.
+        try:
+            from repositories import list_system_health
+
+            components = list_system_health()
+        except Exception:  # noqa: BLE001 — merge is best-effort
+            components = []
+        for component in components:
+            state[component.get("component", "unknown")] = {
+                "status": component.get("status"),
+                "updated_at": component.get("updated_at"),
+                "details": component.get("details"),
+            }
     return _envelope(request, System(backend=str(state.get("backend", os.environ.get("AGENT_BACKEND", "decision_loop"))), provider=state.get("provider"), paper_trading=os.environ.get("PAPER_TRADING", "").lower() == "true", dry_run=bool(state.get("dry_run", False)), kill_switch=bool(state.get("kill_switch_enabled", False)), health=state))
 
 

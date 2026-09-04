@@ -24,6 +24,11 @@ def _env(name: str, default: str | None = None) -> str | None:
     return value.strip()
 
 
+def is_production_env() -> bool:
+    """True only when APP_ENV is explicitly 'production'."""
+    return (_env("APP_ENV") or "development").strip().lower() == "production"
+
+
 def _env_bool(name: str, default: bool) -> bool:
     value = _env(name)
     if value is None:

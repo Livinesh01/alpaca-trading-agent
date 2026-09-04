@@ -1,0 +1,142 @@
+
+
++-----------------------------------------------------------------------------+
+|                                                                             |
+|                                                                             |
+|                        \u2584\u2580\u2580 \u2584\u2580\u2588 \u2588\u2580\u2580 \u2580\u2588\u2580 \u2588\u2580\u2584\u2580\u2588 \u2588\u2580\u2580 \u2588\u2580\u2588                        |
+|                        \u2588\u2580  \u2588\u2580\u2588 \u2584\u2584\u2588  \u2588  \u2588 \u2580 \u2588 \u2588\u2584\u2584 \u2588\u2580\u2580                        |
+|                                                                             |
+|                                                                             |
+|                                                                             |
+|                                FastMCP 3.4.7                                |
+|                            https://gofastmcp.com                            |
+|                                                                             |
+|                 \U0001f5a5  Server:      Alpaca MCP Server, 3.4.7                    |
+|                 \U0001f680 Deploy free: https://horizon.prefect.io                  |
+|                                                                             |
++-----------------------------------------------------------------------------+
++-----------------------------------------------------------------------------+
+|                         \U0001f389 Update available: 4.0.2                          |
+|                     Run: pip install --upgrade fastmcp                      |
++-----------------------------------------------------------------------------+
+
+
+[09/04/26 14:28:17] INFO     Starting MCP server 'Alpaca MCP   transport.py:241
+                             Server' with transport 'stdio'                    
+[09/04/26 14:28:18] Error calling tool 'get_clock'                             
+                    +----------- Traceback (most recent call last) -----------+
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\server\providers\openapi\component |
+                    | s.py:211 in run                                         |
+                    |                                                         |
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\httpx\_models.py:829 in raise_for_status   |
+                    |                                                         |
+                    |    826         }                                        |
+                    |    827         error_type = error_types.get(status_clas |
+                    |    828         message = message.format(self, error_typ |
+                    | >  829         raise HTTPStatusError(message, request=r |
+                    |    830                                                  |
+                    |    831     def json(self, **kwargs: typing.Any) -> typi |
+                    |    832         return jsonlib.loads(self.content, **kwa |
+                    +---------------------------------------------------------+
+                    HTTPStatusError: Client error '401 Unauthorized' for url   
+                    'https://paper-api.alpaca.markets/v2/clock'                
+                    For more information check:                                
+                    https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/40
+                    1                                                          
+                                                                               
+                    The above exception was the direct cause of the following  
+                    exception:                                                 
+                                                                               
+                    +----------- Traceback (most recent call last) -----------+
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\server\server.py:1312 in call_tool |
+                    |                                                         |
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\tools\base.py:421 in _run          |
+                    |                                                         |
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\server\providers\openapi\component |
+                    | s.py:248 in run                                         |
+                    +---------------------------------------------------------+
+                    ValueError: HTTP error 401: Unauthorized - <html>          
+                    <head><title>401 Authorization Required</title></head>     
+                    <body>                                                     
+                    <center><h1>401 Authorization Required</h1></center>       
+                    <hr><center>nginx</center>                                 
+                    </body>                                                    
+                    </html>                                                    
+                                                                               
+                    Error calling tool 'get_clock'                             
+
+
++-----------------------------------------------------------------------------+
+|                                                                             |
+|                                                                             |
+|                        \u2584\u2580\u2580 \u2584\u2580\u2588 \u2588\u2580\u2580 \u2580\u2588\u2580 \u2588\u2580\u2584\u2580\u2588 \u2588\u2580\u2580 \u2588\u2580\u2588                        |
+|                        \u2588\u2580  \u2588\u2580\u2588 \u2584\u2584\u2588  \u2588  \u2588 \u2580 \u2588 \u2588\u2584\u2584 \u2588\u2580\u2580                        |
+|                                                                             |
+|                                                                             |
+|                                                                             |
+|                                FastMCP 3.4.7                                |
+|                            https://gofastmcp.com                            |
+|                                                                             |
+|                 \U0001f5a5  Server:      Alpaca MCP Server, 3.4.7                    |
+|                 \U0001f680 Deploy free: https://horizon.prefect.io                  |
+|                                                                             |
++-----------------------------------------------------------------------------+
++-----------------------------------------------------------------------------+
+|                         \U0001f389 Update available: 4.0.2                          |
+|                     Run: pip install --upgrade fastmcp                      |
++-----------------------------------------------------------------------------+
+
+
+[09/04/26 14:28:26] INFO     Starting MCP server 'Alpaca MCP   transport.py:241
+                             Server' with transport 'stdio'                    
+[09/04/26 14:28:27] Error calling tool 'get_clock'                             
+                    +----------- Traceback (most recent call last) -----------+
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\server\providers\openapi\component |
+                    | s.py:211 in run                                         |
+                    |                                                         |
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\httpx\_models.py:829 in raise_for_status   |
+                    |                                                         |
+                    |    826         }                                        |
+                    |    827         error_type = error_types.get(status_clas |
+                    |    828         message = message.format(self, error_typ |
+                    | >  829         raise HTTPStatusError(message, request=r |
+                    |    830                                                  |
+                    |    831     def json(self, **kwargs: typing.Any) -> typi |
+                    |    832         return jsonlib.loads(self.content, **kwa |
+                    +---------------------------------------------------------+
+                    HTTPStatusError: Client error '401 Unauthorized' for url   
+                    'https://paper-api.alpaca.markets/v2/clock'                
+                    For more information check:                                
+                    https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/40
+                    1                                                          
+                                                                               
+                    The above exception was the direct cause of the following  
+                    exception:                                                 
+                                                                               
+                    +----------- Traceback (most recent call last) -----------+
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\server\server.py:1312 in call_tool |
+                    |                                                         |
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\tools\base.py:421 in _run          |
+                    |                                                         |
+                    | C:\Users\acer\Downloads\alpaca-trading-agent\venv\Lib\s |
+                    | ite-packages\fastmcp\server\providers\openapi\component |
+                    | s.py:248 in run                                         |
+                    +---------------------------------------------------------+
+                    ValueError: HTTP error 401: Unauthorized - <html>          
+                    <head><title>401 Authorization Required</title></head>     
+                    <body>                                                     
+                    <center><h1>401 Authorization Required</h1></center>       
+                    <hr><center>nginx</center>                                 
+                    </body>                                                    
+                    </html>                                                    
+                                                                               
+                    Error calling tool 'get_clock'                             

@@ -47,6 +47,7 @@ ORDER_LOOKUP_TOOLS = ("get_order_by_client_id", "get_order_by_client_order_id")
 ORDER_LIST_TOOLS = ("get_orders", "get_all_orders", "list_orders")
 CLIENT_ORDER_ID_BUCKET_SECONDS = int(os.environ.get("CLIENT_ORDER_ID_BUCKET_SECONDS", "300"))
 SIGNALS_TOOL = "get_technical_signals"
+CLOCK_TOOL = "get_clock"
 SIGNALS_TOOL_SCHEMA = {
     "type": "object",
     "properties": {
@@ -319,6 +320,53 @@ async def _get_fresh_last_price(
     raise ValueError(f"{LATEST_TRADE_TOOL} failed: {last_error}")
 
 
+def _clock_is_open(payload: Any) -> bool:
+    """Extract the authoritative Alpaca market-open flag from a get_clock payload.
+
+    Accepts the common upstream shapes (bare clock object, {"clock": {...}}, or a
+    one-element list). Raises ValueError when the flag is missing or malformed —
+    an unreadable clock must fail closed, never default to open.
+    """
+    clock: Any = payload
+    if isinstance(payload, dict):
+        clock = payload.get("clock", payload.get("data", payload))
+    elif isinstance(payload, list):
+        if len(payload) == 1 and isinstance(payload[0], dict):
+            clock = payload[0]
+        else:
+            raise ValueError("market clock payload is not a clock object")
+    if not isinstance(clock, dict):
+        raise ValueError("market clock payload is not an object")
+
+    raw = clock.get("is_open", clock.get("isOpen"))
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        lowered = raw.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError("market clock payload missing/invalid is_open flag")
+
+
+async def _market_is_open(upstream: ClientSession, upstream_tool_names: set[str]) -> bool:
+    """Ask the authoritative Alpaca clock whether the market is open.
+
+    Fail closed: a missing clock tool, an upstream error, an unparseable
+    payload, or a closed market all refuse the order path.
+    """
+    if CLOCK_TOOL not in upstream_tool_names:
+        raise ValueError("market clock tool is unavailable (fail closed)")
+    result = await upstream.call_tool(CLOCK_TOOL, {})
+    if getattr(result, "isError", False):
+        raise ValueError(_first_text_block(result) or f"{CLOCK_TOOL} returned an error")
+    payload = _unwrap_payload(_to_json_or_none(_first_text_block(result)))
+    if payload is None:
+        raise ValueError("could not parse JSON from get_clock response")
+    return _clock_is_open(payload)
+
+
 def _extract_stock_bars(payload: Any, symbol: str) -> list[dict[str, Any]]:
     normalized = symbol.upper()
     if isinstance(payload, dict):
@@ -580,6 +628,28 @@ async def run_proxy() -> None:
             forwarded_args = dict(arguments)
             client_order_id = _generate_client_order_id(name, forwarded_args)
             forwarded_args["client_order_id"] = client_order_id
+
+            # Market-clock guard: the authoritative Alpaca clock decides. Market
+            # closed OR clock unavailable => ORDER REJECTED (fail closed). This
+            # gate cannot be bypassed by --force or any in-process path: it runs
+            # inside the proxy immediately before every order submission.
+            try:
+                if not await _market_is_open(upstream, upstream_tool_names):
+                    reason = "Market is closed (authoritative Alpaca clock)."
+                    journal.log_order_decision(symbol, side, qty or notional, False, reason)
+                    metrics.ORDERS_BLOCKED.labels(reason_category="market_closed").inc()
+                    return [types.TextContent(
+                        type="text",
+                        text=f"REJECTED by risk guard: {reason} Order not sent to Alpaca.",
+                    )]
+            except ValueError as exc:
+                reason = f"Market clock guard: {exc}"
+                journal.log_order_decision(symbol, side, qty or notional, False, reason)
+                metrics.ORDERS_BLOCKED.labels(reason_category="market_clock").inc()
+                return [types.TextContent(
+                    type="text",
+                    text=f"REJECTED by risk guard: {reason} Order not sent to Alpaca.",
+                )]
 
             try:
                 account_state = await _build_account_state(upstream, symbol)

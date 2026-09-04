@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 env:
   PYTHON_VERSION: "3.12"
@@ -56,15 +56,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Scan for secrets in tracked files
         run: |
-          git ls-files | grep -v -E '\.(png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|pdf)$' | while read f; do
-            python -c "
-import re, sys
-patterns = [r'AKIA[0-9A-Z]{16}', r'gh[pousr]_[A-Za-z0-9]{36,}', r'glpat-[A-Za-z0-9_-]{20,}', r'xox[baprs]-[A-Za-z0-9-]{10,}', r'sk-[A-Za-z0-9]{20,}']
-for p in patterns:
-    if re.search(p, open(sys.argv[1], errors='ignore').read()):
-        print(f'POTENTIAL SECRET in {sys.argv[1]}')
-        sys.exit(1)
-" \"\$f\" || exit 1
+          git ls-files -z | grep -zv -E '\.(png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|pdf)$' | while IFS= read -r -d '' f; do
+            python - "$f" <<'PY'
+          import re
+          import sys
+
+          patterns = [
+              r'AKIA[0-9A-Z]{16}',
+              r'gh[pousr]_[A-Za-z0-9]{36,}',
+              r'glpat-[A-Za-z0-9_-]{20,}',
+              r'xox[baprs]-[A-Za-z0-9-]{10,}',
+              r'sk-[A-Za-z0-9]{20,}',
+          ]
+          content = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+          if any(re.search(pattern, content) for pattern in patterns):
+              print(f'POTENTIAL SECRET in {sys.argv[1]}')
+              sys.exit(1)
+          PY
           done
           echo "No secrets found in tracked files"
       - name: Scan Python dependencies for vulnerabilities

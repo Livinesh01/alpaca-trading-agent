@@ -227,7 +227,11 @@ def test_jwt_invalid_signature_rejected(monkeypatch):
     auth.auth_mode.cache_clear()
     now = int(time.time())
     payload = {"sub": "user-1", "role": "VIEWER", "iat": now, "exp": now + 3600}
-    token = pyjwt.encode(payload, "wrong-secret", algorithm="HS256")
+    # Wrong secret must still be >=32 bytes to avoid PyJWT InsecureKeyLengthWarning;
+    # the test only requires that it differs from the configured signing secret.
+    wrong_secret = "y" * 48
+    assert wrong_secret != "x" * 48
+    token = pyjwt.encode(payload, wrong_secret, algorithm="HS256")
 
     with pytest.raises(HTTPException):
         auth._decode_token(token)

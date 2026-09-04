@@ -235,6 +235,33 @@ _db_url_cache: str | None = None
 _engine: Any = None
 _SessionLocal: Any = None
 
+# Every table the production runtime depends on. `ensure_database()` (startup)
+# refuses to start the API/worker when any of these is missing after migration.
+REQUIRED_TABLES: tuple[str, ...] = (
+    "worker_heartbeats",
+    "worker_leases",
+    "decisions",
+    "orders",
+    "executions",
+    "risk_events",
+    "agent_events",
+    "system_health",
+    "audit_events",
+    "idempotency_states",
+)
+
+
+def verify_schema() -> list[str]:
+    """Return the names of required tables missing from the database.
+
+    Empty list means the schema is complete. Raises only on inspection failure.
+    """
+    from sqlalchemy import inspect
+
+    engine = get_engine()
+    existing = set(inspect(engine).get_table_names())
+    return [table for table in REQUIRED_TABLES if table not in existing]
+
 
 def get_db_url() -> str:
     global _db_url_cache

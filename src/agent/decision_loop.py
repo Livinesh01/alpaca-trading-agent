@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -177,6 +178,31 @@ def build_decision_prompt(
     return context + "HISTORICAL CONTEXT IS INFORMATIONAL ONLY; current market data and Python risk controls remain authoritative.\n\nYour decision JSON:"
 
 
+def _extract_client_order_id(submit_result: Any) -> str | None:
+    """Pull the broker client_order_id out of a proxy submission result.
+
+    The risk-guard proxy returns the upstream order object (JSON text) on
+    success; the idempotency key is the fallback identifier when the payload
+    does not expose one. Purely informational — never used for execution.
+    """
+    if submit_result is None:
+        return None
+    candidate: Any = submit_result
+    if isinstance(submit_result, str):
+        try:
+            candidate = json.loads(submit_result)
+        except (TypeError, json.JSONDecodeError):
+            return None
+    if isinstance(candidate, dict):
+        value = (
+            candidate.get("client_order_id")
+            or candidate.get("clientOrderID")
+            or candidate.get("id")
+        )
+        return str(value) if value else None
+    return None
+
+
 @dataclass(frozen=True)
 class OrderOutcome:
     """One validated decision and what the loop did with it."""
@@ -235,6 +261,7 @@ class DecisionLoop:
         memory_store: MemoryStore | None = None,
         run_id: str | None = None,
         observability: Observability | None = None,
+        persistence: Any = None,
     ) -> None:
         self.provider = provider
         self.fetch_bars = fetch_bars
@@ -251,6 +278,9 @@ class DecisionLoop:
         self.memory_store = memory_store
         self.run_id = run_id or create_run_id()
         self.observability = observability
+        # Production persistence (PostgreSQL-authoritative, fail closed). None
+        # in development/tests: no repository call is made without a database.
+        self.persistence = persistence
 
     def _submit(self, order: OrderRequest) -> Any:
         """Call the executor boundary (object with `.submit` or a plain callable)."""
@@ -260,6 +290,18 @@ class DecisionLoop:
 
     def run(self) -> RunResult:
         """One full decision cycle. Any failure aborts with zero orders submitted."""
+        # C1 preflight: production persistence must be healthy BEFORE any LLM or
+        # market work — a decision that cannot be persisted must not be traded.
+        if self.persistence is not None:
+            try:
+                self.persistence.preflight()
+            except Exception as exc:  # noqa: BLE001 — fail closed, zero orders
+                if self.observability:
+                    self.observability.emit(
+                        "persistence_failure", run_id=self.run_id, error=type(exc).__name__
+                    )
+                return RunResult(False, "", "", error=f"persistence preflight failed: {exc}")
+
         account_by_symbol: dict[str, AccountState] = {}
         signals_by_symbol: dict[str, dict[str, Any]] = {}
         prices: dict[str, float] = {}
@@ -357,12 +399,12 @@ class DecisionLoop:
             str(decision["symbol"]).upper(): create_decision_id()
             for decision in decisions
         }
-        if self.memory_store is not None:
-            provider_model = str(getattr(self.provider, "model", "unknown"))
-            provider_name = type(self.provider).__name__
-            for decision in decisions:
-                symbol = str(decision["symbol"]).upper()
-                decision_id = decision_ids[symbol]
+        provider_model = str(getattr(self.provider, "model", "unknown"))
+        provider_name = type(self.provider).__name__
+        for decision in decisions:
+            symbol = str(decision["symbol"]).upper()
+            decision_id = decision_ids[symbol]
+            if self.memory_store is not None:
                 try:
                     self.memory_store.save_decision(
                         {
@@ -384,15 +426,34 @@ class DecisionLoop:
                     )
                 except Exception as exc:  # noqa: BLE001 — memory is informational only
                     del exc
-                if self.observability:
-                    self.observability.emit(
-                        "decision_created",
-                        run_id=self.run_id,
-                        decision_id=decision_id,
-                        symbol=symbol,
-                        action=decision["action"],
-                        confidence=decision["confidence"],
-                    )
+            if self.observability:
+                self.observability.emit(
+                    "decision_created",
+                    run_id=self.run_id,
+                    decision_id=decision_id,
+                    symbol=symbol,
+                    action=decision["action"],
+                    confidence=decision["confidence"],
+                )
+            if self.persistence is not None:
+                # C1: the decision is authoritative state — persist BEFORE any
+                # order path can run. Failure raises and aborts the whole run
+                # (zero orders); DB failure is never treated as success.
+                self.persistence.record_decision(
+                    {
+                        "decision_id": decision_id,
+                        "run_id": self.run_id,
+                        "symbol": symbol,
+                        "action": decision["action"],
+                        "confidence": decision["confidence"],
+                        "thesis": decision["thesis"],
+                        "entry_reason": decision["entry_reason"],
+                        "position_size": decision.get("position_size", 0),
+                        "decision_price": prices.get(symbol),
+                        "model": provider_model,
+                        "provider": provider_name,
+                    }
+                )
 
         outcomes: list[OrderOutcome] = []
         submitted_count = 0
@@ -428,6 +489,7 @@ class DecisionLoop:
             submitted = False
             executor_error = None
             execution_id = create_execution_id()
+            submit_result: Any = None
             if order is not None and risk.allowed:
                 if self.observability:
                     self.observability.emit(
@@ -440,9 +502,38 @@ class DecisionLoop:
                         qty=order.qty,
                     )
                 try:
-                    self._submit(order)
+                    if self.persistence is not None:
+                        # C1: durable duplicate protection + order intent are
+                        # recorded BEFORE the final gate runs. Any failure here
+                        # raises -> caught below -> zero orders for this symbol.
+                        self.persistence.claim_idempotency(
+                            order.idempotency_key,
+                            run_id=self.run_id,
+                            decision_id=decision_id,
+                            symbol=symbol,
+                            side=order.side,
+                            qty=order.qty,
+                        )
+                        self.persistence.record_order(
+                            {
+                                "order_id": order.idempotency_key,
+                                "symbol": symbol,
+                                "side": order.side,
+                                "qty": order.qty,
+                                "order_type": order.order_type,
+                                "status": "submitted",
+                                "decision_id": decision_id,
+                                "run_id": self.run_id,
+                                "submitted_at": time.time(),
+                            }
+                        )
+                    submit_result = self._submit(order)
                     submitted = True
                     submitted_count += 1
+                    if self.persistence is not None:
+                        self.persistence.update_idempotency_execution(
+                            order.idempotency_key, execution_id
+                        )
                     if self.observability:
                         self.observability.emit(
                             "execution_success",
@@ -515,6 +606,45 @@ class DecisionLoop:
                     )
                 except Exception as exc:  # noqa: BLE001 — memory is informational only
                     del exc
+            if self.persistence is not None:
+                # C1: persist the execution outcome and the deterministic risk
+                # verdict. Failures raise -> run aborts -> no further orders.
+                side_for_record = order.side if order is not None else "hold"
+                qty_for_record = float(qty)
+                client_order_id = (
+                    _extract_client_order_id(submit_result) or order.idempotency_key
+                    if order is not None
+                    else f"no-order-{execution_id}"
+                )
+                self.persistence.record_execution(
+                    {
+                        "execution_id": execution_id,
+                        "order_id": order.idempotency_key if order is not None else f"no-order-{execution_id}",
+                        "symbol": symbol,
+                        "side": side_for_record,
+                        "qty": qty_for_record,
+                        "client_order_id": client_order_id,
+                        "status": (
+                            "submitted" if submitted else ("failed" if executor_error else "not_submitted")
+                        ),
+                        "executed_at": time.time(),
+                        "decision_id": decision_id,
+                        "run_id": self.run_id,
+                    }
+                )
+                self.persistence.record_risk_event(
+                    {
+                        "event_id": f"risk-{execution_id}",
+                        "symbol": symbol,
+                        "side": side_for_record,
+                        "qty": qty_for_record,
+                        "allowed": risk.allowed,
+                        "reason_code": risk.reason_code,
+                        "reason": risk.reason,
+                        "decision_id": decision_id,
+                        "run_id": self.run_id,
+                    }
+                )
 
         return RunResult(
             success=True,

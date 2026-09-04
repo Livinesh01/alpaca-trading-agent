@@ -30,6 +30,7 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(__file__))
 import journal
+import lease_guard
 import observability as observability_module
 from agent.llm import FeatherlessLLMProvider, LLMProvider, NVIDIAProvider
 from errors import FinalGateRejectionError
@@ -602,6 +603,13 @@ class _FinalOrderGate:
             self._refuse("paper trading is not enabled")
         if os.environ.get(_KILL_SWITCH_ENV, "").strip().lower() in _TRUTHY_ENV_VALUES:
             self._refuse(f"{_KILL_SWITCH_ENV} is set (emergency stop)")
+        if lease_guard.is_lost():
+            # C2: the worker can no longer prove ownership of its PostgreSQL
+            # lease — no order may leave the process (fail closed).
+            self._refuse(
+                "worker lease is lost; trading is halted until the lease is recovered",
+                reason_code="LEASE_LOST",
+            )
 
         symbol = str(getattr(order, "symbol", "") or "")
         if not symbol or not self._SYMBOL_RE.fullmatch(symbol):
@@ -673,6 +681,23 @@ class _FinalOrderGate:
         return result
 
 
+def _build_persistence() -> Any:
+    """Wire the fail-closed PostgreSQL persistence adapter (C1).
+
+    Returns None when no database is configured (development/tests): the
+    repository layer is never invoked without DATABASE_URL, so existing local
+    behavior is unchanged. When a database IS configured, the adapter is
+    fail-closed: any persistence failure aborts the run with zero orders.
+    """
+    import repositories as repo
+
+    if not repo.is_db_configured():
+        return None
+    from persistence import SentinelPersistence
+
+    return SentinelPersistence()
+
+
 def _build_decision_loop(
     cfg: dict,
     *,
@@ -682,6 +707,7 @@ def _build_decision_loop(
     dry_run: bool = False,
     run_id: str | None = None,
     observability: Observability | None = None,
+    persistence: Any = None,
 ) -> Any:
     """Wire a DecisionLoop to the risk-guard proxy (paper trading only).
 
@@ -761,6 +787,9 @@ def _build_decision_loop(
     watchlist = [str(s).upper() for s in cfg.get("watchlist", [])] or None
     idempotency_store = IdempotencyStore()
     if dry_run:
+        # Dry-run never touches the order path, so it also never touches the
+        # durable order-intent/idempotency records (dev rehearsal tool only).
+        persistence = None
         executor: Any = _DryRunExecutor()
     else:
         executor = _FinalOrderGate(
@@ -784,6 +813,7 @@ def _build_decision_loop(
         memory_store=MemoryStore(),
         observability=observability or Observability(),
         run_id=run_id,
+        persistence=persistence,
     )
 
 
@@ -804,7 +834,23 @@ def _run_once_decision_loop(cfg: dict, dry_run: bool = False) -> int:
 
     session = _RiskGuardProxySession()
     run_id = create_run_id()
-    observer = Observability()
+    # C1: PostgreSQL is authoritative whenever a database is configured — wire
+    # the fail-closed persistence adapter and mirror events into agent_events
+    # so the production API can read real state without a shared filesystem.
+    persistence = _build_persistence()
+    if persistence is not None:
+        from persistence import PgMirroredObservability
+
+        observer = PgMirroredObservability()
+        try:
+            persistence.preflight()
+        except Exception as exc:  # noqa: BLE001 — fail closed before ANY work
+            observer.emit("run_failed", run_id=run_id, error=type(exc).__name__)
+            print(f"Run failed (fail closed): {exc}", file=sys.stderr)
+            journal.log_run_end(f"Run failed: {exc}")
+            return 1
+    else:
+        observer = Observability()
     observer.emit("run_started", run_id=run_id, dry_run=dry_run)
     try:
         provider = build_llm_provider()  # fails closed before any subprocess spawns

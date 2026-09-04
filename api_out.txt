@@ -1,0 +1,3 @@
+2026-09-04 14:28:00 [info     ] starting_sentinel_api          auth_mode=disabled version=0.3.0
+2026-09-04 14:28:19 [warning  ] Alpaca connectivity check failed: RuntimeError
+2026-09-04 14:28:28 [warning  ] Alpaca connectivity check failed: RuntimeError
