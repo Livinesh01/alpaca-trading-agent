@@ -106,7 +106,8 @@ class Execution(Base):
     __tablename__ = "executions"
 
     id = Column(String(64), primary_key=True)
-    order_id = Column(String(128), ForeignKey("orders.id"), nullable=False)
+    # Nullable: HOLD / rejected paths persist an execution without an order row.
+    order_id = Column(String(128), ForeignKey("orders.id"), nullable=True)
     symbol = Column(String(16), nullable=False, index=True)
     side = Column(String(8), nullable=False)
     qty = Column(Float, nullable=False)

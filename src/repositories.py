@@ -6,9 +6,11 @@ function is best-effort for non-authoritative records (audit, observability,
 memory) and raises explicitly for authoritative records when the caller must
 fail closed.
 
-Database failures MUST NOT cause unsafe trading behavior: the trading path only
-uses `claim_idempotency_guard` for duplicate protection. On DB outage, the system
-requires broker-side idempotency reconciliation via Alpaca client_order_id.
+Database failures MUST NOT cause unsafe trading behavior. The production
+execution path treats any persistence failure as a hard abort (zero orders).
+`claim_idempotency_guard` is the durable duplicate lock; Alpaca
+`client_order_id` reconciliation is an additional safety mechanism, never a
+substitute for a healthy PostgreSQL claim.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
+
+from sqlalchemy.exc import IntegrityError
 
 from db import (
     AgentEvent,
@@ -31,6 +35,7 @@ from db import (
     WorkerLease,
     db_session,
     get_session,
+    is_database_available as _db_available,
 )
 from errors import ExecutionError
 
@@ -50,6 +55,17 @@ def is_db_configured() -> bool:
     from db import get_db_url
 
     return bool(get_db_url())
+
+
+def is_database_available() -> bool:
+    """True when PostgreSQL accepts connections right now."""
+    return _db_available()
+
+
+def _production_requires_db() -> bool:
+    from config import is_production_env
+
+    return is_production_env()
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +150,16 @@ def acquire_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> 
     Returns False if another worker holds a valid lease.
     """
     if not is_db_configured():
-        return True  # No DB = single worker mode (development)
+        # Production never runs without PostgreSQL; development may.
+        return not _production_requires_db()
     
     try:
-        from sqlalchemy import select
+        from sqlalchemy import select, text
         
         with db_session() as session:
+            # Serialize competing workers so two processes cannot both insert
+            # an active lease in the window between SELECT and INSERT.
+            session.execute(text("SELECT pg_advisory_xact_lock(87236401)"))
             now = _now_datetime()
             
             # Check for existing valid lease
@@ -180,7 +200,7 @@ def acquire_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> 
 def renew_worker_lease(*, worker_id: str, lease_expiry_seconds: int = 300) -> bool:
     """Renew the worker lease."""
     if not is_db_configured():
-        return True
+        return not _production_requires_db()
     
     try:
         from sqlalchemy import select
@@ -340,7 +360,7 @@ def record_execution(execution: dict[str, Any]) -> bool:
             session.merge(
                 Execution(
                     id=str(execution.get("execution_id") or ""),
-                    order_id=str(execution.get("order_id") or ""),
+                    order_id=(str(execution["order_id"]) if execution.get("order_id") else None),
                     symbol=str(execution.get("symbol") or "").upper(),
                     side=str(execution.get("side") or "").lower(),
                     qty=float(execution.get("qty") or 0),
@@ -514,6 +534,8 @@ def claim_idempotency_guard(key: str, *, run_id: str, decision_id: str, symbol: 
                 )
             )
         return "completed"
+    except IntegrityError:
+        return "rejected_duplicate"
     except Exception:  # noqa: BLE001
         # DB error - signal that broker-side reconciliation is required
         # DO NOT fail open - this prevents duplicate orders during DB outages
@@ -968,6 +990,7 @@ __all__ = [
     "get_decision",
     "get_execution_for_decision",
     "get_risk_event_for_decision",
+    "is_database_available",
     "is_db_configured",
     "latest_worker_heartbeat",
     "list_agent_events",
