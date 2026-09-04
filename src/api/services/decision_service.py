@@ -94,7 +94,11 @@ def list_decisions(store: MemoryStore, *, page: int = 1, page_size: int = 50, **
 
 def _pg_replay(decision_id: str) -> dict[str, Any] | None:
     """Build the replay timeline from PostgreSQL records (production)."""
-    from repositories import get_decision, get_execution_for_decision, get_risk_event_for_decision
+    from repositories import (
+        get_decision,
+        get_execution_for_decision,
+        get_risk_event_for_decision,
+    )
 
     record = get_decision(decision_id)
     if record is None:

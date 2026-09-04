@@ -336,7 +336,7 @@ def _clock_is_open(payload: Any) -> bool:
         else:
             raise ValueError("market clock payload is not a clock object")
     if not isinstance(clock, dict):
-        raise ValueError("market clock payload is not an object")
+        raise TypeError("market clock payload is not an object")
 
     raw = clock.get("is_open", clock.get("isOpen"))
     if isinstance(raw, bool):

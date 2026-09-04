@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-__all__ = ["is_production", "use_postgres_history", "unavailable"]
+__all__ = ["is_production", "unavailable", "use_postgres_history"]
 
 
 def is_production() -> bool:

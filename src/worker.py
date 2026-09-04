@@ -29,8 +29,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-import bootstrap  # noqa: E402  (src/ is on sys.path when run as src/worker.py)
-import lease_guard  # noqa: E402
+import bootstrap
+import lease_guard
 
 DEFAULT_INTERVAL_SECONDS = 900
 MIN_INTERVAL_SECONDS = 60
@@ -107,7 +107,11 @@ def _write_status(status: str, *, last_error: str | None = None, last_result: in
 
     # PRIMARY: Persist heartbeat to PostgreSQL (authoritative source)
     try:
-        from repositories import is_db_configured, record_system_health, save_worker_heartbeat
+        from repositories import (
+            is_db_configured,
+            record_system_health,
+            save_worker_heartbeat,
+        )
         if is_db_configured():
             save_worker_heartbeat(
                 worker_id=WORKER_ID,
@@ -181,9 +185,9 @@ def _renew_worker_lease() -> bool:
         import bootstrap
         from repositories import is_db_configured, renew_worker_lease
         if not is_db_configured():
-            if bootstrap.is_production():
-                return False  # C3: production always requires a renewable lease
-            return True
+            # C3: production always requires a renewable lease; development
+            # falls back to single-worker mode without a database.
+            return not bootstrap.is_production()
         return renew_worker_lease(worker_id=WORKER_ID)
     except Exception as exc:  # noqa: BLE001 - Fail closed on lease renewal errors
         logger.error(
@@ -214,11 +218,17 @@ def _lease_renewal_iteration(consecutive_failures: int) -> tuple[int, str]:
                    but the worker is still inside its recovery grace period.
       "give_up"  - the grace period is exhausted; the worker must stop safely.
     """
-    if _renew_worker_lease():
+    try:
+        renewed = _renew_worker_lease()
+    except Exception as exc:  # noqa: BLE001 - any error == failed renewal (fail closed)
+        logger.error("worker lease renewal raised: %s", type(exc).__name__)
+        renewed = False
+    if renewed:
         if consecutive_failures > 0:
             logger.info(
                 "worker lease recovered after %d failed renewal(s)", consecutive_failures
             )
+        lease_guard.mark_recovered()
         return 0, "healthy"
 
     failures = consecutive_failures + 1
@@ -259,8 +269,6 @@ def _lease_renewal_loop() -> None:
             _lease_gave_up.set()
             _shutdown_requested.set()
             break
-        if action == "healthy":
-            lease_guard.mark_recovered()
         _shutdown_requested.wait(LEASE_RENEWAL_INTERVAL_SECONDS)
 
 
@@ -318,7 +326,7 @@ def run_forever(*, cycle: Callable[[], int] | None = None, sleep: Callable[[floa
         try:
             bootstrap.validate_startup_config()
             bootstrap.ensure_database()
-        except Exception as exc:  # noqa: BLE001 - fail closed, never start unsafe
+        except Exception as exc:
             _write_status("blocked", last_error=f"startup failed: {type(exc).__name__}")
             raise
 

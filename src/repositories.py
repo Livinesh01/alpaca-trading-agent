@@ -709,7 +709,7 @@ def list_decisions(
                 "reason": None,
                 "pagination": {"page": page, "page_size": page_size, "total": total},
             }
-    except Exception as exc:  # noqa: BLE001 — caller surfaces explicit unavailability
+    except Exception as exc:
         raise ExecutionError(f"decision history unavailable: {type(exc).__name__}") from exc
 
 
@@ -719,7 +719,7 @@ def get_decision(decision_id: str) -> dict[str, Any] | None:
         with get_session() as session:
             row = session.get(Decision, str(decision_id))
             return _decision_to_dict(row) if row is not None else None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"decision lookup unavailable: {type(exc).__name__}") from exc
 
 
@@ -738,7 +738,7 @@ def list_executions(*, page: int = 1, page_size: int = 50) -> dict[str, Any]:
                 "items": [_execution_to_dict(row) for row in rows],
                 "pagination": {"page": page, "page_size": page_size, "total": total},
             }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"execution history unavailable: {type(exc).__name__}") from exc
 
 
@@ -755,7 +755,7 @@ def get_execution_for_decision(decision_id: str) -> dict[str, Any] | None:
             )
             row = session.scalars(stmt).first()
             return _execution_to_dict(row) if row is not None else None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"execution lookup unavailable: {type(exc).__name__}") from exc
 
 
@@ -780,7 +780,7 @@ def list_risk_events(*, page: int = 1, page_size: int = 50, run_id: str | None =
                 "items": [_risk_event_to_dict(row) for row in rows],
                 "pagination": {"page": page, "page_size": page_size, "total": total},
             }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"risk history unavailable: {type(exc).__name__}") from exc
 
 
@@ -797,7 +797,7 @@ def get_risk_event_for_decision(decision_id: str) -> dict[str, Any] | None:
             )
             row = session.scalars(stmt).first()
             return _risk_event_to_dict(row) if row is not None else None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"risk lookup unavailable: {type(exc).__name__}") from exc
 
 
@@ -811,7 +811,7 @@ def count_risk_events(*, allowed: bool | None = None) -> int:
             if allowed is not None:
                 stmt = stmt.where(RiskEvent.allowed == bool(allowed))
             return int(session.scalar(stmt) or 0)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"risk count unavailable: {type(exc).__name__}") from exc
 
 
@@ -859,7 +859,7 @@ def list_agent_events(
                 "items": [_agent_event_to_dict(row) for row in rows],
                 "pagination": {"page": page, "page_size": page_size, "total": total},
             }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"activity history unavailable: {type(exc).__name__}") from exc
 
 
@@ -873,7 +873,7 @@ def count_agent_events(event_type: str | None = None) -> int:
             if event_type:
                 stmt = stmt.where(AgentEvent.event_type == str(event_type))
             return int(session.scalar(stmt) or 0)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"event count unavailable: {type(exc).__name__}") from exc
 
 
@@ -910,7 +910,7 @@ def list_audit_events(
                 "available": True,
                 "pagination": {"page": page, "page_size": page_size, "total": total},
             }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"audit history unavailable: {type(exc).__name__}") from exc
 
 
@@ -930,7 +930,7 @@ def list_system_health() -> list[dict[str, Any]]:
                 }
                 for row in rows
             ]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ExecutionError(f"system health unavailable: {type(exc).__name__}") from exc
 
 

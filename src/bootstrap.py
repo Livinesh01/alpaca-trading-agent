@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from errors import ConfigurationError
 
-__all__ = ["is_production", "validate_startup_config", "ensure_database", "database_status"]
+__all__ = ["database_status", "ensure_database", "is_production", "validate_startup_config"]
 
 
 def is_production() -> bool:

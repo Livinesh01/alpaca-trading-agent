@@ -484,7 +484,7 @@ def test_worker_signal_handler_sets_shutdown_flag():
 
 def test_worker_has_version_metadata():
     import worker
-    assert worker.WORKER_VERSION == "0.4.0"
+    assert worker.WORKER_VERSION == "0.5.0"
     assert worker.HEARTBEAT_MAX_AGE_SECONDS == 600
 
 

@@ -17,6 +17,7 @@ best-effort: it must never break execution.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -24,7 +25,9 @@ import repositories as repo
 from errors import DuplicateExecutionError, ExecutionError
 from observability import Observability
 
-__all__ = ["SentinelPersistence", "PgMirroredObservability"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["PgMirroredObservability", "SentinelPersistence"]
 
 
 class SentinelPersistence:
@@ -118,10 +121,10 @@ class PgMirroredObservability(Observability):
     best-effort and can never break execution.
     """
 
-    def emit(self, event_type: str, **kwargs: Any) -> None:  # noqa: D102 — see base
+    def emit(self, event_type: str, **kwargs: Any) -> None:
         super().emit(event_type, **kwargs)
         try:
             event: dict[str, Any] = {"timestamp": time.time(), "event_type": event_type, **kwargs}
             repo.record_agent_event(event)
-        except Exception:  # noqa: BLE001 — mirror is informational only
-            pass
+        except Exception as exc:  # noqa: BLE001 — mirror is informational only
+            logger.debug("failed to mirror observability event to PostgreSQL: %s", type(exc).__name__)

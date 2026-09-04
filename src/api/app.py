@@ -144,7 +144,8 @@ def _worker_healthy() -> dict[str, Any]:
             "heartbeat_fresh": False,
             "last_error": db_result.get("last_error", "no PostgreSQL heartbeat"),
             "worker_version": db_result.get("worker_version"),
-            "db_available": _database_available(),\n            "source": "postgresql_unavailable",
+            "db_available": _database_available(),
+            "source": "postgresql_unavailable",
         }
 
     # FALLBACK: Local JSON file (development only)
@@ -271,8 +272,8 @@ async def lifespan(_: FastAPI):
         if bootstrap.is_production():
             from repositories import record_system_health
             record_system_health("api", "stopped", {"version": APP_VERSION})
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - best-effort shutdown record
+        logger.warning("failed to record api shutdown health: %s", type(exc).__name__)
     logger.info("sentinel_api_stopped")
 
 app = FastAPI(title="Sentinel API", version=APP_VERSION, docs_url="/docs", redoc_url=None, lifespan=lifespan)

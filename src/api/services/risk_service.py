@@ -18,7 +18,6 @@ from api.services.utils import iso_now, num
 from memory import MemoryStore
 from observability import Observability
 
-
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
@@ -105,9 +104,6 @@ def get_risk(
     utilization = exposure / max_position if (max_position and max_position > 0) else None
     top_exposure = max((num(item.get("exposure")) or 0.0 for item in positions.get("items", [])), default=0.0)
     concentration = top_exposure / exposure if exposure and exposure > 0 else None
-
-    rejections = _memory_rejections(store)
-    stale_blocks = _count_events(observability, "market_data_failure")
 
     return {
         "available": positions.get("available", False) or account.get("available", False),
