@@ -250,11 +250,30 @@ def _check_llm_connectivity() -> dict[str, str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("starting_sentinel_api", version=APP_VERSION, auth_mode=str(auth_mode()))
+    # C3/C5: production startup is fail-closed - validate the strict
+    # production configuration and provision/verify the PostgreSQL schema
+    # BEFORE the API serves any request. Any failure here prevents startup.
+    try:
+        import bootstrap
+        if bootstrap.is_production():
+            bootstrap.validate_startup_config()
+            bootstrap.ensure_database()
+            from repositories import record_system_health
+            record_system_health("api", "running", {"version": APP_VERSION})
+    except Exception as exc:
+        logger.error("api_startup_failed", error=type(exc).__name__)
+        raise
     yield
     shutdown_event.set()
     close_data_source()
+    try:
+        import bootstrap
+        if bootstrap.is_production():
+            from repositories import record_system_health
+            record_system_health("api", "stopped", {"version": APP_VERSION})
+    except Exception:
+        pass
     logger.info("sentinel_api_stopped")
-
 
 app = FastAPI(title="Sentinel API", version=APP_VERSION, docs_url="/docs", redoc_url=None, lifespan=lifespan)
 
