@@ -133,15 +133,16 @@ def test_featherless_missing_api_key_raises(monkeypatch):
         FeatherlessLLMProvider(client=mock.Mock())
 
 
-def test_featherless_missing_or_blank_model_raises(monkeypatch):
+def test_featherless_missing_or_blank_model_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("FEATHERLESS_API_KEY", "sk-test")
     monkeypatch.delenv("FEATHERLESS_MODEL", raising=False)
-    with pytest.raises(ValueError, match="FEATHERLESS_MODEL"):
-        FeatherlessLLMProvider(client=mock.Mock())
+    provider = FeatherlessLLMProvider(client=mock.Mock())
+    assert provider.model == FeatherlessLLMProvider.DEFAULT_MODEL
+    assert provider.model == "zai-org/GLM-5.3-Flash"
 
     monkeypatch.setenv("FEATHERLESS_MODEL", "   ")
-    with pytest.raises(ValueError, match="FEATHERLESS_MODEL"):
-        FeatherlessLLMProvider(client=mock.Mock())
+    provider = FeatherlessLLMProvider(client=mock.Mock())
+    assert provider.model == FeatherlessLLMProvider.DEFAULT_MODEL
 
 
 def test_featherless_api_failure_raises(monkeypatch):

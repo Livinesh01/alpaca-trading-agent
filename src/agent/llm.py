@@ -195,10 +195,6 @@ _MISSING_KEY_HINT = (
     "FEATHERLESS_API_KEY is not set. Add FEATHERLESS_API_KEY to your environment "
     "or .env (never hard-code or commit it)."
 )
-_MISSING_MODEL_HINT = (
-    "FEATHERLESS_MODEL is not set or is empty. Set FEATHERLESS_MODEL in your "
-    "environment or .env, e.g. FEATHERLESS_MODEL=<model-id>."
-)
 _REDACTED = "[REDACTED]"
 
 
@@ -208,11 +204,13 @@ class FeatherlessLLMProvider:
     Speaks Featherless' OpenAI-compatible API via the `openai` SDK, so no
     Featherless-specific SDK or extra dependency is needed. Reads
     FEATHERLESS_API_KEY and FEATHERLESS_MODEL from the environment (dotenv
-    loads the project `.env`, which never overrides real env vars). An API key
-    never appears in any raised exception.
+    loads the project `.env`, which never overrides real env vars);
+    FEATHERLESS_MODEL defaults to `FeatherlessLLMProvider.DEFAULT_MODEL` when
+    not provided. An API key never appears in any raised exception.
     """
 
     DEFAULT_BASE_URL = "https://api.featherless.ai/v1"
+    DEFAULT_MODEL = "zai-org/GLM-5.3-Flash"
     _CHAT_PARAMS = (
         "temperature",
         "max_tokens",
@@ -239,9 +237,7 @@ class FeatherlessLLMProvider:
 
         resolved_model = model if model is not None else os.environ.get("FEATHERLESS_MODEL", "")
         resolved_model = str(resolved_model or "").strip()
-        if not resolved_model:
-            raise ValueError(_MISSING_MODEL_HINT)
-        self.model = resolved_model
+        self.model = resolved_model or self.DEFAULT_MODEL
         self.base_url = base_url
 
         if client is not None:
