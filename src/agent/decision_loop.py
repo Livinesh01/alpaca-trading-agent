@@ -612,14 +612,14 @@ class DecisionLoop:
                 side_for_record = order.side if order is not None else "hold"
                 qty_for_record = float(qty)
                 client_order_id = (
-                    _extract_client_order_id(submit_result) or order.idempotency_key
+                    (_extract_client_order_id(submit_result) or order.idempotency_key)
                     if order is not None
                     else f"no-order-{execution_id}"
                 )
                 self.persistence.record_execution(
                     {
                         "execution_id": execution_id,
-                        "order_id": order.idempotency_key if order is not None else f"no-order-{execution_id}",
+                        "order_id": order.idempotency_key if order is not None else None,
                         "symbol": symbol,
                         "side": side_for_record,
                         "qty": qty_for_record,

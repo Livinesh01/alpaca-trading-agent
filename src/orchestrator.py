@@ -786,6 +786,9 @@ def _build_decision_loop(
 
     watchlist = [str(s).upper() for s in cfg.get("watchlist", [])] or None
     idempotency_store = IdempotencyStore()
+    from config import is_production_env
+
+    memory_store = None if is_production_env() else MemoryStore()
     if dry_run:
         # Dry-run never touches the order path, so it also never touches the
         # durable order-intent/idempotency records (dev rehearsal tool only).
@@ -810,7 +813,7 @@ def _build_decision_loop(
         executor=executor,
         limits=limits,
         watchlist=watchlist,
-        memory_store=MemoryStore(),
+        memory_store=memory_store,
         observability=observability or Observability(),
         run_id=run_id,
         persistence=persistence,
@@ -838,6 +841,15 @@ def _run_once_decision_loop(cfg: dict, dry_run: bool = False) -> int:
     # the fail-closed persistence adapter and mirror events into agent_events
     # so the production API can read real state without a shared filesystem.
     persistence = _build_persistence()
+    if persistence is None and not dry_run:
+        from config import is_production_env
+
+        if is_production_env():
+            # C1/C3: production never trades without PostgreSQL-backed persistence.
+            msg = "production requires PostgreSQL persistence; refusing to run (fail closed)"
+            print(f"Run failed (fail closed): {msg}", file=sys.stderr)
+            journal.log_run_end(f"Run failed: {msg}")
+            return 1
     if persistence is not None:
         from persistence import PgMirroredObservability
 
@@ -862,6 +874,7 @@ def _run_once_decision_loop(cfg: dict, dry_run: bool = False) -> int:
             dry_run=dry_run,
             run_id=run_id,
             observability=observer,
+            persistence=persistence,
         )
         result = loop.run()
     except Exception as exc:  # noqa: BLE001 — fail closed: nothing reached the executor
@@ -917,6 +930,8 @@ def _run_once_decision_loop(cfg: dict, dry_run: bool = False) -> int:
 
 def run_once(force: bool = False, dry_run: bool = False) -> int:
     cfg = load_config()
+    # Heuristic only: --force may skip this weekday/RTH check. It NEVER bypasses
+    # the authoritative Alpaca market-clock gate inside the risk-guard proxy.
     if cfg.get("schedule", {}).get("skip_if_market_closed", True) and not force and not market_likely_open(cfg):
         print("Market likely closed (US equities, weekday 9:30-16:00 ET) — skipping run.")
         return 0
