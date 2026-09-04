@@ -17,7 +17,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 # Normalize imports for both uvicorn and direct test imports.
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
-from api.auth import Role, require_admin, require_operator, require_trader, require_viewer
+from api.auth import (
+    Role,
+    require_admin,
+    require_trader,
+    require_viewer,
+)
 from api.schemas import (
     Account,
     APIEnvelope,
