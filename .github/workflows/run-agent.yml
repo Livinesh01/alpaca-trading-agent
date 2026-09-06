@@ -29,21 +29,39 @@ jobs:
       - name: Install Cline CLI
         run: npm install -g cline
 
-      # The agent loop now IS the Cline CLI (orchestrator.py invokes `cline`),
-      # so there is no Anthropic API key involved. Authentication is done via
-      # the Cline provider/usage-billing; install a token as a GitHub secret
-      # named CLINE_API_KEY and pass it to `cline auth -k`.
+      # CLINE_API_KEY must exist as a repository secret or `cline` cannot
+      # authenticate, so the run dies at the cline invocation step with an
+      # obscure error. Fail fast with setup instructions instead (matches
+      # GitHub's "context access might be invalid" warning for secrets that are
+      # not configured on the repo).
       - name: Authenticate Cline (non-interactive)
         env:
           CLINE_API_KEY: ${{ secrets.CLINE_API_KEY }}
         run: |
           if [ -z "$CLINE_API_KEY" ]; then
-            echo "::warning::CLINE_API_KEY secret not set — skipping auth."
-            echo "The run will fail at the cline invocation step. Add a Cline"
-            echo "API key as a GH secret named CLINE_API_KEY to enable CI runs."
-            exit 0
+            echo "::error::CLINE_API_KEY secret is not set."
+            echo "Create it from your Cline provider/usage-billing settings, e.g.:"
+            echo "  gh secret set CLINE_API_KEY -R ${{ github.repository }}"
+            exit 1
           fi
           cline auth -p cline -k "$CLINE_API_KEY"
+
+      # ALPACA_API_KEY / ALPACA_SECRET_KEY must exist as repository secrets or the
+      # Cline/MCP session dies with an obscure auth error mid-run. Fail fast with
+      # runnable setup instructions instead (matches GitHub's "context access might
+      # be invalid" warning for secrets that are not configured on the repo).
+      - name: Check Alpaca credentials
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        run: |
+          if [ -z "$ALPACA_API_KEY" ] || [ -z "$ALPACA_SECRET_KEY" ]; then
+            echo "::error::ALPACA_API_KEY / ALPACA_SECRET_KEY are not set as repo secrets."
+            echo "Add them at Settings > Secrets and variables > Actions, e.g.:"
+            echo "  gh secret set ALPACA_API_KEY    -R ${{ github.repository }}"
+            echo "  gh secret set ALPACA_SECRET_KEY -R ${{ github.repository }}"
+            exit 1
+          fi
 
       - name: Run agent
         env:
