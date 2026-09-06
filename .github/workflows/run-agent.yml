@@ -21,35 +21,27 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Set up Node.js (for Cline CLI)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install Cline CLI
-        run: npm install -g cline
-
-      # CLINE_API_KEY must exist as a repository secret or `cline` cannot
-      # authenticate, so the run dies at the cline invocation step with an
-      # obscure error. Fail fast with setup instructions instead (matches
-      # GitHub's "context access might be invalid" warning for secrets that are
-      # not configured on the repo).
-      - name: Authenticate Cline (non-interactive)
+      # The agent runs through orchestrator.py's DecisionLoop backend with a
+      # Featherless/NVIDIA LLM provider — NOT the Cline CLI, so no CLINE_API_KEY
+      # is needed. Since there is no .env file in CI, every credential and mode
+      # flag below comes from GitHub secrets / this job's env.
+      - name: Check LLM credentials
         env:
-          CLINE_API_KEY: ${{ secrets.CLINE_API_KEY }}
+          FEATHERLESS_API_KEY: ${{ secrets.FEATHERLESS_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
         run: |
-          if [ -z "$CLINE_API_KEY" ]; then
-            echo "::error::CLINE_API_KEY secret is not set."
-            echo "Create it from your Cline provider/usage-billing settings, e.g.:"
-            echo "  gh secret set CLINE_API_KEY -R ${{ github.repository }}"
+          if [ -z "$FEATHERLESS_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
+            echo "::error::No LLM provider key is set. The DecisionLoop backend requires FEATHERLESS_API_KEY or NVIDIA_API_KEY."
+            echo "Add one as a repository secret, e.g.:"
+            echo "  gh secret set FEATHERLESS_API_KEY -R ${{ github.repository }}"
+            echo "  gh secret set NVIDIA_API_KEY     -R ${{ github.repository }}"
             exit 1
           fi
-          cline auth -p cline -k "$CLINE_API_KEY"
 
-      # ALPACA_API_KEY / ALPACA_SECRET_KEY must exist as repository secrets or the
-      # Cline/MCP session dies with an obscure auth error mid-run. Fail fast with
-      # runnable setup instructions instead (matches GitHub's "context access might
-      # be invalid" warning for secrets that are not configured on the repo).
+      # ALPACA_API_KEY / ALPACA_SECRET_KEY are consumed by the risk-guard proxy
+      # that the DecisionLoop spawns. Fail fast with setup instructions when they
+      # are not configured (matches GitHub's "context access might be invalid"
+      # warning for secrets that are not configured on the repo).
       - name: Check Alpaca credentials
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
@@ -65,10 +57,13 @@ jobs:
 
       - name: Run agent
         env:
+          AGENT_BACKEND: decision_loop
+          PAPER_TRADING: "true"
+          LLM_PROVIDER: featherless
+          FEATHERLESS_API_KEY: ${{ secrets.FEATHERLESS_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-          CLINE_RUN_TIMEOUT_SECONDS: "600"
-          CLINE_MAX_RETRIES: "6"
         run: python src/orchestrator.py --force
 
       - name: Commit updated journal
@@ -78,4 +73,3 @@ jobs:
           git add journal/
           git diff --staged --quiet || git commit -m "Trading agent run: $(date -u +'%Y-%m-%d %H:%M UTC')"
           git push
-
